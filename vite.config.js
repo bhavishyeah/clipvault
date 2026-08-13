@@ -42,20 +42,21 @@ export default defineConfig({
 ],
 
         share_target: {
-          action: '/share',
-          method: 'GET',
-          params: {
-            title: 'title',
-            text: 'text',
-            url: 'url',
-          },
-        },
+  action: '/',
+  method: 'GET',
+  enctype: 'application/x-www-form-urlencoded',
+  params: {
+    title: 'title',
+    text: 'text',
+    url: 'url',
+  },
+},
       },
 
-      workbox: {
-        cleanupOutdatedCaches: true,
-        navigateFallback: '/',
-      },
+     workbox: {
+  cleanupOutdatedCaches: true,
+  navigateFallback: '/index.html',
+},
 
       devOptions: {
         enabled: true,
