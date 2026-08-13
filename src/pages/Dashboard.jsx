@@ -3,6 +3,9 @@ import { supabase } from '../lib/supabaseClient'
 import { useClips } from '../hooks/useClips'
 import PasteZone from '../components/clips/PasteZone'
 import './Dashboard.css'
+import MobilePasteBox from '../components/clips/MobilePasteBox'
+import './mobile-paste-box.css'
+import './mobile-spacing-final.css'
 
 const formatDate = (value) =>
   new Intl.DateTimeFormat('en', {
@@ -137,23 +140,20 @@ export default function Dashboard({ user }) {
           <strong>Laptop:</strong> copy text, then press <kbd>Ctrl</kbd> + <kbd>V</kbd>
         </div>
         <div className="mobile-hint">
-          <strong>Mobile:</strong> use share or upload to save screenshots and images
+          <strong>Mobile:</strong> use the paste box below to save text and links
         </div>
       </div>
     </div>
-  </div>
-
-  <div className="capture-stats">
-    <strong>{clips.length}</strong>
-    <span>saved clips</span>
   </div>
 
   <div className="shortcut-hint">
     <kbd>Ctrl</kbd><span>+</span><kbd>V</kbd>
   </div>
 
+  <div className="saving-label">Encrypting and saving…</div>
+
+  <MobilePasteBox onSave={saveText} saving={saving} />
   <PasteZone onText={saveText} onImage={saveImage} />
-  {saving && <div className="saving-label">Encrypting and saving…</div>}
 </section>
         <section className="toolbar">
           <div className="section-title">

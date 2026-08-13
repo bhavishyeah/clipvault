@@ -1,0 +1,99 @@
+.mobile-paste-box {
+  display: none;
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid #ffffff16;
+  border-radius: 16px;
+  background: #ffffff08;
+}
+
+.mobile-paste-heading,
+.mobile-paste-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mobile-paste-label {
+  color: #8d80ff;
+  font-family: 'Archivo', sans-serif;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+}
+
+.mobile-paste-heading h3 {
+  margin: 5px 0 0;
+  color: #e6e4f5;
+  font: 500 17px 'Clash Display', sans-serif;
+}
+
+.mobile-paste-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid #8f83ff55;
+  border-radius: 10px;
+  color: #a59cff;
+  background: #786aff18;
+  font-size: 22px;
+}
+
+.mobile-paste-box textarea {
+  display: block;
+  width: 100%;
+  min-height: 105px;
+  margin-top: 14px;
+  padding: 13px;
+  resize: vertical;
+  border: 1px solid #ffffff18;
+  border-radius: 11px;
+  outline: none;
+  color: #eeeeff;
+  background: #08090f99;
+  font: 14px/1.5 'Archivo', sans-serif;
+}
+
+.mobile-paste-box textarea::placeholder {
+  color: #74758c;
+}
+
+.mobile-paste-box textarea:focus {
+  border-color: #887cffaa;
+  box-shadow: 0 0 0 3px #7668ff18;
+}
+
+.mobile-paste-footer {
+  margin-top: 10px;
+  color: #74758c;
+  font-size: 11px;
+}
+
+.mobile-paste-footer button {
+  padding: 9px 14px;
+  border: 0;
+  border-radius: 8px;
+  color: #ffffff;
+  background: linear-gradient(135deg, #7567ff, #a36bff);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.mobile-paste-footer button:disabled {
+  cursor: not-allowed;
+  opacity: .45;
+}
+
+.mobile-paste-success {
+  margin: 10px 0 0;
+  color: #85e6ae;
+  font-size: 11px;
+}
+
+@media (max-width: 700px) {
+  .mobile-paste-box {
+    display: block;
+  }
+}

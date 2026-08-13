@@ -1,0 +1,225 @@
+/* Final mobile spacing pass */
+@media (max-width: 700px) {
+  :root {
+    --mobile-side-space: 16px;
+    --mobile-section-gap: 22px;
+  }
+
+  .vault-container {
+    width: 100%;
+    padding: 14px var(--mobile-side-space) 30px;
+  }
+
+  .topbar {
+    min-height: 38px;
+    padding-bottom: 26px;
+  }
+
+  .brand-lockup {
+    gap: 9px;
+  }
+
+  .brand-mark {
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
+  }
+
+  .brand-name {
+    font-size: 18px;
+  }
+
+  .topbar-actions {
+    gap: 7px;
+  }
+
+  .avatar {
+    width: 27px;
+    height: 27px;
+  }
+
+  .welcome-row {
+    margin-bottom: var(--mobile-section-gap);
+  }
+
+  .eyebrow {
+    margin-bottom: 9px;
+    font-size: 8px;
+    letter-spacing: 1.6px;
+  }
+
+  .welcome-row h1 {
+    max-width: 340px;
+    margin-bottom: 12px;
+    font-size: clamp(31px, 9.8vw, 42px);
+    line-height: .96;
+    letter-spacing: -1.8px;
+  }
+
+  .welcome-copy {
+    max-width: 310px;
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+
+  .capture-card {
+    gap: 14px;
+    margin-bottom: 28px;
+    padding: 17px;
+    border-radius: 18px;
+  }
+
+  .capture-content {
+    gap: 11px;
+  }
+
+  .capture-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 11px;
+    font-size: 20px;
+  }
+
+  .capture-card h2 {
+    margin-bottom: 4px;
+    font-size: 16px;
+  }
+
+  .capture-card p {
+    font-size: 11.5px;
+    line-height: 1.4;
+  }
+
+  .capture-hints {
+    gap: 5px;
+    margin-top: 8px;
+  }
+
+  .desktop-hint,
+  .mobile-hint {
+    font-size: 10.5px;
+    line-height: 1.38;
+  }
+
+  .mobile-paste-box {
+    margin: 0;
+    padding: 13px;
+    border-radius: 14px;
+  }
+
+  .mobile-paste-heading h3 {
+    font-size: 15px;
+  }
+
+  .mobile-paste-box textarea {
+    min-height: 94px;
+    margin-top: 11px;
+    padding: 11px;
+    border-radius: 10px;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .mobile-paste-footer {
+    margin-top: 9px;
+  }
+
+  .mobile-paste-footer button {
+    min-height: 38px;
+  }
+
+  .toolbar {
+    gap: 12px;
+    margin: 0 0 16px;
+  }
+
+  .section-title h2 {
+    font-size: 19px;
+  }
+
+  .toolbar-controls {
+    gap: 8px;
+  }
+
+  .search-box {
+    min-height: 39px;
+    padding: 9px 11px;
+    border-radius: 11px;
+  }
+
+  .filter-tabs {
+    min-height: 39px;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 11px;
+  }
+
+  .filter-tabs button {
+    padding: 7px 9px;
+    font-size: 10px;
+  }
+
+  .clip-grid {
+    gap: 12px;
+  }
+
+  .clip-card {
+    min-height: 165px;
+    padding: 15px;
+    border-radius: 16px;
+  }
+
+  .type-pill {
+    padding: 5px 7px;
+    font-size: 9px;
+  }
+
+  .clip-content {
+    min-height: 44px;
+    font-size: 13px;
+  }
+
+  .image-preview-wrap {
+    height: 128px;
+  }
+
+  .clip-card-bottom {
+    gap: 9px;
+    padding-top: 10px;
+  }
+
+  .clip-actions button {
+    min-height: 30px;
+    padding: 6px 8px;
+    font-size: 10px;
+  }
+
+  .vault-footer {
+    margin-top: 26px;
+    font-size: 9px;
+  }
+}
+
+@media (max-width: 360px) {
+  .vault-container {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .welcome-row h1 {
+    font-size: 30px;
+  }
+
+  .capture-card {
+    padding: 14px;
+  }
+
+  .mobile-paste-box {
+    padding: 11px;
+  }
+
+  .desktop-hint,
+  .mobile-hint {
+    font-size: 10px;
+  }
+}
