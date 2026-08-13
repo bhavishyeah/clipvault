@@ -27,13 +27,19 @@ export default defineConfig({
         categories: ['productivity', 'utilities'],
 
         icons: [
-          {
-            src: '/favicon.svg',
-            sizes: 'any',
-            type: 'image/svg+xml',
-            purpose: 'any maskable',
-          },
-        ],
+  {
+    src: '/pwa-192.svg',
+    sizes: '192x192',
+    type: 'image/svg+xml',
+    purpose: 'any maskable',
+  },
+  {
+    src: '/pwa-512.svg',
+    sizes: '512x512',
+    type: 'image/svg+xml',
+    purpose: 'any maskable',
+  },
+],
 
         share_target: {
           action: '/share',
