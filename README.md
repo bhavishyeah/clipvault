@@ -1,16 +1,60 @@
-# React + Vite
+# ClipVault
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A privacy-focused cross-device clipboard vault. Save copied text, links, screenshots, and images from one device, then access them from another.
 
-Currently, two official plugins are available:
+## Tech Stack
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **Frontend:** React 19 + Vite 8
+- **Auth & Database:** Supabase (PostgreSQL, Row Level Security, Realtime)
+- **Image Storage:** Cloudinary (new uploads) + Supabase Storage (legacy)
+- **PWA:** vite-plugin-pwa (installable on Android)
+- **Hosting:** Vercel
 
-## React Compiler
+## Getting Started
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```bash
+# Install dependencies
+npm install
 
-## Expanding the ESLint configuration
+# Create .env with your credentials
+cp .env.example .env
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+# Start development server
+npm run dev
+```
+
+### Environment Variables
+
+```
+VITE_SUPABASE_URL=your-supabase-url
+VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
+VITE_CLOUDINARY_CLOUD_NAME=your-cloud-name
+VITE_CLOUDINARY_UPLOAD_PRESET=your-upload-preset
+```
+
+## Features
+
+- Email/password authentication
+- Global paste detection (Ctrl+V on desktop)
+- Mobile text/link input with paste box
+- Image upload via file picker and drag-and-drop (JPG/PNG, max 10MB)
+- Real-time cross-device sync
+- Pin, search, filter, copy, download, and delete clips
+- Optimistic UI for instant feedback
+- Delete confirmation modal
+- Toast notifications for all actions
+- Dark glassmorphism design
+- Fully responsive (desktop + mobile)
+- Installable PWA
+
+## Deployment
+
+The project auto-deploys via GitHub → Vercel. Ensure environment variables are set in Vercel project settings before deploying.
+
+## Database
+
+Run `supabase/schema.sql` in the Supabase SQL Editor to set up the `clips` table, RLS policies, storage bucket, and Realtime.
+
+## License
+
+Private project.

@@ -1,8 +1,12 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import { toast } from '../ui/toastStore'
 
-export default function MobilePasteBox({ onSave, saving }) {
+const ACCEPTED_TYPES = ['image/jpeg', 'image/jpg', 'image/png']
+const MAX_SIZE = 10 * 1024 * 1024 // 10MB
+
+export default function MobilePasteBox({ onSave, onImage, saving }) {
   const [text, setText] = useState('')
-  const [message, setMessage] = useState('')
+  const fileRef = useRef(null)
 
   const handleSubmit = async (event) => {
     event.preventDefault()
@@ -12,8 +16,26 @@ export default function MobilePasteBox({ onSave, saving }) {
 
     await onSave(value)
     setText('')
-    setMessage('Saved to your vault')
-    window.setTimeout(() => setMessage(''), 2200)
+  }
+
+  const handleImagePick = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    if (!ACCEPTED_TYPES.includes(file.type)) {
+      toast('Only JPG and PNG images are supported', 'error')
+      e.target.value = ''
+      return
+    }
+
+    if (file.size > MAX_SIZE) {
+      toast('Image must be under 10MB', 'error')
+      e.target.value = ''
+      return
+    }
+
+    onImage(file)
+    e.target.value = ''
   }
 
   return (
@@ -38,12 +60,30 @@ export default function MobilePasteBox({ onSave, saving }) {
 
       <div className="mobile-paste-footer">
         <span>{text.length}/10000</span>
-        <button type="submit" disabled={!text.trim() || saving}>
-          {saving ? 'Saving…' : 'Save text'}
-        </button>
+        <div className="mobile-paste-actions">
+          <button
+            type="button"
+            className="mobile-image-btn"
+            onClick={() => fileRef.current?.click()}
+            disabled={saving}
+            title="Upload image"
+          >
+            📷
+          </button>
+          <button type="submit" disabled={!text.trim() || saving}>
+            {saving ? 'Saving…' : 'Save text'}
+          </button>
+        </div>
       </div>
 
-      {message && <p className="mobile-paste-success">{message}</p>}
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".jpg,.jpeg,.png"
+        onChange={handleImagePick}
+        hidden
+        aria-hidden="true"
+      />
     </form>
   )
 }

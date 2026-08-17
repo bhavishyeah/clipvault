@@ -1,11 +1,13 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useClips } from '../hooks/useClips'
 import PasteZone from '../components/clips/PasteZone'
-import './Dashboard.css'
 import MobilePasteBox from '../components/clips/MobilePasteBox'
-import './mobile-paste-box.css'
-import './mobile-spacing-final.css'
+import ImageUpload from '../components/clips/ImageUpload'
+import ToastContainer from '../components/ui/Toast'
+import { toast } from '../components/ui/toastStore'
+import ConfirmModal from '../components/ui/ConfirmModal'
+import './Dashboard.css'
 
 const formatDate = (value) =>
   new Intl.DateTimeFormat('en', {
@@ -15,7 +17,10 @@ const formatDate = (value) =>
     minute: '2-digit',
   }).format(new Date(value))
 
-const getInitials = (email = '') => email.slice(0, 2).toUpperCase()
+const getInitials = (email = '') => {
+  if (!email) return '?'
+  return email.slice(0, 2).toUpperCase()
+}
 
 export default function Dashboard({ user }) {
   const {
@@ -30,9 +35,22 @@ export default function Dashboard({ user }) {
 
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState('all')
+  const [confirmTarget, setConfirmTarget] = useState(null)
+  const searchTimer = useRef(null)
+  const [debouncedQuery, setDebouncedQuery] = useState('')
+
+  // Debounced search for performance
+  const handleSearchChange = (e) => {
+    const value = e.target.value
+    setQuery(value)
+    window.clearTimeout(searchTimer.current)
+    searchTimer.current = window.setTimeout(() => {
+      setDebouncedQuery(value)
+    }, 200)
+  }
 
   const filteredClips = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase()
+    const normalizedQuery = debouncedQuery.trim().toLowerCase()
 
     return clips.filter((clip) => {
       const matchesType = filter === 'all' || clip.type === filter
@@ -43,40 +61,70 @@ export default function Dashboard({ user }) {
 
       return matchesType && matchesQuery
     })
-  }, [clips, filter, query])
+  }, [clips, filter, debouncedQuery])
 
-  const copyClip = async (clip) => {
-    if (clip.type === 'image' && clip.url) {
-      const response = await fetch(clip.url)
-      const blob = await response.blob()
-      await navigator.clipboard.write([
-        new ClipboardItem({ [blob.type]: blob }),
-      ])
-      return
+  // --- Clipboard actions with error handling ---
+
+  const copyClip = useCallback(async (clip) => {
+    try {
+      if (clip.type === 'image' && clip.url) {
+        if (!navigator.clipboard?.write) {
+          toast('Image copy not supported in this browser', 'error')
+          return
+        }
+        const response = await fetch(clip.url)
+        const blob = await response.blob()
+        await navigator.clipboard.write([
+          new ClipboardItem({ [blob.type]: blob }),
+        ])
+        toast('Image copied')
+        return
+      }
+
+      await navigator.clipboard.writeText(clip.content ?? '')
+      toast('Copied to clipboard')
+    } catch (err) {
+      toast('Failed to copy — try clicking inside the page first', 'error')
+      console.error('Clipboard error:', err)
     }
+  }, [])
 
-    await navigator.clipboard.writeText(clip.content ?? '')
-  }
-
-  const downloadClip = async (clip) => {
+  const downloadClip = useCallback(async (clip) => {
     if (!clip.url) return
 
-    const response = await fetch(clip.url)
-    const blob = await response.blob()
-    const objectUrl = URL.createObjectURL(blob)
-    const link = document.createElement('a')
+    try {
+      const response = await fetch(clip.url)
+      const blob = await response.blob()
+      const objectUrl = URL.createObjectURL(blob)
+      const link = document.createElement('a')
 
-    link.href = objectUrl
-    link.download = clip.file_path?.split('/').pop() || 'clipvault-file'
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    URL.revokeObjectURL(objectUrl)
-  }
+      link.href = objectUrl
+      link.download = clip.file_path?.split('/').pop() || `clipvault-${Date.now()}.${clip.metadata?.format || 'png'}`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(objectUrl)
+      toast('Download started')
+    } catch (err) {
+      toast('Download failed', 'error')
+      console.error('Download error:', err)
+    }
+  }, [])
 
-  const openLink = (content) => {
+  const openLink = useCallback((content) => {
     const url = /^https?:\/\//i.test(content) ? content : `https://${content}`
     window.open(url, '_blank', 'noopener,noreferrer')
+  }, [])
+
+  // --- Delete with confirmation ---
+
+  const handleDeleteClick = (clip) => setConfirmTarget(clip)
+
+  const confirmDelete = () => {
+    if (confirmTarget) {
+      removeClip(confirmTarget)
+      setConfirmTarget(null)
+    }
   }
 
   return (
@@ -128,33 +176,37 @@ export default function Dashboard({ user }) {
           </div>
         </section>
 
-<section className="capture-card">
-  <div className="capture-glow" />
-  <div className="capture-content">
-    <div className="capture-icon">⌘</div>
-    <div>
-      <h2>Capture something new</h2>
-      <p>Copy anything, then paste it anywhere on this page.</p>
-      <div className="capture-hints">
-        <div className="desktop-hint">
-          <strong>Laptop:</strong> copy text, then press <kbd>Ctrl</kbd> + <kbd>V</kbd>
-        </div>
-        <div className="mobile-hint">
-          <strong>Mobile:</strong> use the paste box below to save text and links
-        </div>
-      </div>
-    </div>
-  </div>
+        <section className="capture-card">
+          <div className="capture-glow" />
+          <div className="capture-content">
+            <div className="capture-icon">⌘</div>
+            <div>
+              <h2>Capture something new</h2>
+              <p>Copy anything, then paste it anywhere on this page.</p>
+              <div className="capture-hints">
+                <div className="desktop-hint">
+                  <strong>Laptop:</strong> copy text, then press <kbd>Ctrl</kbd> + <kbd>V</kbd>
+                </div>
+                <div className="mobile-hint">
+                  <strong>Mobile:</strong> use the paste box below to save text and links
+                </div>
+              </div>
+            </div>
+          </div>
 
-  <div className="shortcut-hint">
-    <kbd>Ctrl</kbd><span>+</span><kbd>V</kbd>
-  </div>
+          <div className="shortcut-hint">
+            <kbd>Ctrl</kbd><span>+</span><kbd>V</kbd>
+          </div>
 
-  <div className="saving-label">Encrypting and saving…</div>
+          {saving && <div className="saving-label">Saving…</div>}
 
-  <MobilePasteBox onSave={saveText} saving={saving} />
-  <PasteZone onText={saveText} onImage={saveImage} />
-</section>
+          <MobilePasteBox onSave={saveText} onImage={saveImage} saving={saving} />
+          <PasteZone onText={saveText} onImage={saveImage} />
+        </section>
+
+        {/* Desktop image upload zone */}
+        <ImageUpload onImage={saveImage} saving={saving} />
+
         <section className="toolbar">
           <div className="section-title">
             <h2>Your clips</h2>
@@ -165,7 +217,7 @@ export default function Dashboard({ user }) {
               <span>⌕</span>
               <input
                 value={query}
-                onChange={(event) => setQuery(event.target.value)}
+                onChange={handleSearchChange}
                 placeholder="Search your vault..."
               />
             </label>
@@ -211,7 +263,7 @@ export default function Dashboard({ user }) {
 
                 {clip.type === 'image' ? (
                   <div className="image-preview-wrap">
-                    <img src={clip.url} alt="Saved clip" className="image-preview" />
+                    <img src={clip.url} alt="Saved clip" className="image-preview" loading="lazy" />
                   </div>
                 ) : (
                   <>
@@ -224,9 +276,10 @@ export default function Dashboard({ user }) {
                   <time>{formatDate(clip.created_at)}</time>
                   <div className="clip-actions">
                     {clip.type !== 'image' && <button onClick={() => copyClip(clip)}>Copy</button>}
+                    {clip.type === 'image' && <button onClick={() => copyClip(clip)}>Copy</button>}
                     {clip.type === 'link' && <button onClick={() => openLink(clip.content)}>Open</button>}
                     {clip.type === 'image' && <button onClick={() => downloadClip(clip)}>Download</button>}
-                    <button className="delete-action" onClick={() => removeClip(clip)}>Delete</button>
+                    <button className="delete-action" onClick={() => handleDeleteClick(clip)}>Delete</button>
                   </div>
                 </div>
               </article>
@@ -238,6 +291,16 @@ export default function Dashboard({ user }) {
           <span>Private by design</span><span>•</span><span>Stored securely in your vault</span>
         </footer>
       </div>
+
+      <ToastContainer />
+
+      <ConfirmModal
+        open={!!confirmTarget}
+        title="Delete clip?"
+        message="This clip will be permanently removed. This cannot be undone."
+        onConfirm={confirmDelete}
+        onCancel={() => setConfirmTarget(null)}
+      />
     </main>
   )
 }

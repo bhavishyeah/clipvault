@@ -23,7 +23,11 @@ export default function App() {
   }, [])
 
   if (loading) {
-    return <p style={{ padding: 24 }}>Loading…</p>
+    return (
+      <div style={{ display: 'grid', placeItems: 'center', minHeight: '100vh', color: '#9698ad' }}>
+        <p>Loading…</p>
+      </div>
+    )
   }
 
   return session ? <Dashboard user={session.user} /> : <Login />

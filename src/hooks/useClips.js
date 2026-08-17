@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { toast } from '../components/ui/toastStore'
 
 const SUPABASE_BUCKET = 'clips'
 const CLOUDINARY_CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
@@ -8,29 +9,38 @@ const CLOUDINARY_UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
 const isUrl = (text) =>
   /^(https?:\/\/)?[\w.-]+\.[a-z]{2,}([/?#].*)?$/i.test(text)
 
+function sortClips(list) {
+  return [...list].sort((a, b) => {
+    if (a.is_pinned !== b.is_pinned) return a.is_pinned ? -1 : 1
+    return new Date(b.created_at) - new Date(a.created_at)
+  })
+}
+
+async function resolveUrl(clip) {
+  if (clip.metadata?.provider === 'cloudinary') {
+    return { ...clip, url: clip.metadata.secure_url }
+  }
+  if (!clip.file_path) return clip
+
+  const { data } = await supabase.storage
+    .from(SUPABASE_BUCKET)
+    .createSignedUrl(clip.file_path, 3600)
+
+  return { ...clip, url: data?.signedUrl ?? null }
+}
+
+function attachFileUrls(rows) {
+  return Promise.all(rows.map(resolveUrl))
+}
+
 export function useClips(user) {
   const [clips, setClips] = useState([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const channelRef = useRef(null)
 
-  const attachFileUrls = async (rows) =>
-    Promise.all(
-      rows.map(async (clip) => {
-        if (clip.metadata?.provider === 'cloudinary') {
-          return { ...clip, url: clip.metadata.secure_url }
-        }
-
-        if (!clip.file_path) return clip
-
-        const { data } = await supabase.storage
-          .from(SUPABASE_BUCKET)
-          .createSignedUrl(clip.file_path, 60 * 60)
-
-        return { ...clip, url: data?.signedUrl ?? null }
-      })
-    )
-
-  const fetchClips = useCallback(async () => {
+  // --- Full refresh (used for manual refresh only) ---
+  const refresh = useCallback(async () => {
     if (!user) return
 
     const { data, error } = await supabase
@@ -39,52 +49,140 @@ export function useClips(user) {
       .order('is_pinned', { ascending: false })
       .order('created_at', { ascending: false })
 
-    if (!error) setClips(await attachFileUrls(data ?? []))
-    else console.error('Could not load clips:', error.message)
+    if (error) {
+      console.error('Could not load clips:', error.message)
+      toast('Failed to load clips', 'error')
+    } else {
+      setClips(await attachFileUrls(data ?? []))
+    }
 
     setLoading(false)
   }, [user])
 
+  // --- Setup: initial load + Realtime subscription ---
   useEffect(() => {
-    fetchClips()
+    if (!user) return
+
+    let cancelled = false
+
+    const loadInitial = async () => {
+      const { data, error } = await supabase
+        .from('clips')
+        .select('*')
+        .order('is_pinned', { ascending: false })
+        .order('created_at', { ascending: false })
+
+      if (cancelled) return
+
+      if (error) {
+        console.error('Could not load clips:', error.message)
+        toast('Failed to load clips', 'error')
+      } else {
+        setClips(await attachFileUrls(data ?? []))
+      }
+      setLoading(false)
+    }
+
+    loadInitial()
 
     const channel = supabase
       .channel('clips-live')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'clips' },
-        fetchClips
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'clips',
+          filter: `user_id=eq.${user.id}`,
+        },
+        async (payload) => {
+          const enriched = await resolveUrl(payload.new)
+          setClips((prev) => {
+            if (prev.some((c) => c.id === enriched.id)) return prev
+            return sortClips([enriched, ...prev])
+          })
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'clips',
+          filter: `user_id=eq.${user.id}`,
+        },
+        async (payload) => {
+          const enriched = await resolveUrl(payload.new)
+          setClips((prev) =>
+            sortClips(prev.map((c) => (c.id === enriched.id ? enriched : c)))
+          )
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'clips',
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload) => {
+          setClips((prev) => prev.filter((c) => c.id !== payload.old.id))
+        }
       )
       .subscribe()
 
+    channelRef.current = channel
+
     return () => {
+      cancelled = true
       supabase.removeChannel(channel)
     }
-  }, [fetchClips])
+  }, [user])
 
-  const saveText = async (rawText) => {
+  // --- Save text (optimistic) ---
+  const saveText = useCallback(async (rawText) => {
     const content = rawText.trim()
     if (!content || !user) return
 
     setSaving(true)
 
+    const type = isUrl(content) ? 'link' : 'text'
+    const optimistic = {
+      id: `temp-${Date.now()}`,
+      user_id: user.id,
+      type,
+      content,
+      metadata: {},
+      is_pinned: false,
+      created_at: new Date().toISOString(),
+    }
+
+    setClips((prev) => sortClips([optimistic, ...prev]))
+
     const { error } = await supabase.from('clips').insert({
       user_id: user.id,
-      type: isUrl(content) ? 'link' : 'text',
+      type,
       content,
     })
 
-    if (error) console.error('Could not save text:', error.message)
+    if (error) {
+      setClips((prev) => prev.filter((c) => c.id !== optimistic.id))
+      toast('Failed to save clip', 'error')
+      console.error('Could not save text:', error.message)
+    } else {
+      toast(`${type === 'link' ? 'Link' : 'Text'} saved`)
+    }
 
-    await fetchClips()
     setSaving(false)
-  }
+  }, [user])
 
-  const saveImage = async (blob) => {
+  // --- Save image ---
+  const saveImage = useCallback(async (blob) => {
     if (!user) return
 
     if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) {
-      console.error('Missing Cloudinary environment variables')
+      toast('Image upload not configured', 'error')
       return
     }
 
@@ -124,18 +222,25 @@ export function useClips(user) {
       })
 
       if (error) throw new Error(error.message)
-    } catch (error) {
-      console.error('Could not save image:', error.message)
+
+      toast('Image saved')
+    } catch (err) {
+      toast('Failed to upload image', 'error')
+      console.error('Could not save image:', err.message)
     } finally {
-      await fetchClips()
       setSaving(false)
     }
-  }
+  }, [user])
 
-  const removeClip = async (clip) => {
+  // --- Remove clip (optimistic) ---
+  const removeClip = useCallback(async (clip) => {
+    setClips((prev) => prev.filter((c) => c.id !== clip.id))
+
     const { error } = await supabase.from('clips').delete().eq('id', clip.id)
 
     if (error) {
+      setClips((prev) => sortClips([...prev, clip]))
+      toast('Failed to delete clip', 'error')
       console.error('Could not delete clip:', error.message)
       return
     }
@@ -144,18 +249,27 @@ export function useClips(user) {
       await supabase.storage.from(SUPABASE_BUCKET).remove([clip.file_path])
     }
 
-    await fetchClips()
-  }
+    // TODO: Delete Cloudinary asset server-side (requires secure backend endpoint)
 
-  const togglePin = async (clip) => {
+    toast('Clip deleted')
+  }, [])
+
+  // --- Toggle pin (optimistic) ---
+  const togglePin = useCallback(async (clip) => {
+    const updated = { ...clip, is_pinned: !clip.is_pinned }
+    setClips((prev) => sortClips(prev.map((c) => (c.id === clip.id ? updated : c))))
+
     const { error } = await supabase
       .from('clips')
       .update({ is_pinned: !clip.is_pinned })
       .eq('id', clip.id)
 
-    if (error) console.error('Could not update pin:', error.message)
-    await fetchClips()
-  }
+    if (error) {
+      setClips((prev) => sortClips(prev.map((c) => (c.id === clip.id ? clip : c))))
+      toast('Failed to update pin', 'error')
+      console.error('Could not update pin:', error.message)
+    }
+  }, [])
 
   return {
     clips,
@@ -165,6 +279,6 @@ export function useClips(user) {
     saveImage,
     removeClip,
     togglePin,
-    refresh: fetchClips,
+    refresh,
   }
 }
