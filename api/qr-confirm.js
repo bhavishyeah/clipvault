@@ -1,5 +1,6 @@
-// POST /api/qr-confirm — Called from mobile to confirm a QR session
-// Body: { token, access_token }
+// POST /api/qr-confirm — Called from phone after scanning QR
+// Creates an anonymous user, links it to the QR token
+// Returns session credentials for the phone too
 
 import { createClient } from '@supabase/supabase-js'
 
@@ -11,29 +12,16 @@ const supabase = createClient(
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
 
   if (req.method === 'OPTIONS') return res.status(200).end()
-
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' })
-  }
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
   try {
-    const { token, access_token } = req.body
+    const { token } = req.body
+    if (!token) return res.status(400).json({ error: 'Token required' })
 
-    if (!token || !access_token) {
-      return res.status(400).json({ error: 'Token and access_token required' })
-    }
-
-    // Verify the mobile user's session
-    const { data: userData, error: userError } = await supabase.auth.getUser(access_token)
-
-    if (userError || !userData?.user) {
-      return res.status(401).json({ error: 'Invalid access token' })
-    }
-
-    // Find the pending QR session
+    // Find the pending session
     const { data: session, error: sessionError } = await supabase
       .from('qr_sessions')
       .select('*')
@@ -48,31 +36,43 @@ export default async function handler(req, res) {
     // Check expiry
     if (new Date(session.expires_at) < new Date()) {
       await supabase.from('qr_sessions').delete().eq('id', session.id)
-      return res.status(410).json({ error: 'QR code expired' })
+      return res.status(410).json({ error: 'QR code expired. Generate a new one.' })
     }
 
-    // Invalidate any existing QR sessions for this user (single session only)
-    await supabase
-      .from('qr_sessions')
-      .delete()
-      .eq('user_id', userData.user.id)
-      .neq('id', session.id)
+    // Create anonymous user via admin API
+    const anonEmail = `anon-${Date.now()}@clipvault.temp`
+    const anonPassword = `anon-${session.token.slice(0, 32)}`
 
-    // Confirm the session
-    const { error: updateError } = await supabase
+    const { data: userData, error: createError } = await supabase.auth.admin.createUser({
+      email: anonEmail,
+      password: anonPassword,
+      email_confirm: true,
+      user_metadata: { is_anonymous: true, qr_session: session.id },
+    })
+
+    if (createError) {
+      return res.status(500).json({ error: createError.message })
+    }
+
+    const userId = userData.user.id
+
+    // Update QR session as confirmed with the new user_id
+    await supabase
       .from('qr_sessions')
       .update({
         status: 'confirmed',
-        user_id: userData.user.id,
+        user_id: userId,
         last_active: new Date().toISOString(),
       })
       .eq('id', session.id)
 
-    if (updateError) {
-      return res.status(500).json({ error: updateError.message })
-    }
-
-    return res.status(200).json({ success: true, message: 'QR session confirmed' })
+    // Return credentials so the phone can also sign in as this user
+    return res.status(200).json({
+      success: true,
+      email: anonEmail,
+      password: anonPassword,
+      user_id: userId,
+    })
   } catch (err) {
     return res.status(500).json({ error: err.message })
   }

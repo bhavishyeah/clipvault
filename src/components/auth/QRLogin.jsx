@@ -2,10 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import QRCode from 'qrcode'
 import { supabase } from '../../lib/supabaseClient'
 
-export default function QRLogin({ onSessionReady }) {
+export default function QRLogin() {
   const [qrDataUrl, setQrDataUrl] = useState(null)
-  const [token, setToken] = useState(null)
-  const [status, setStatus] = useState('generating') // generating, waiting, confirming, error, expired
+  const [status, setStatus] = useState('generating') // generating, waiting, signing-in, error, expired
+  const tokenRef = useRef(null)
   const pollRef = useRef(null)
   const mountedRef = useRef(true)
 
@@ -16,16 +16,14 @@ export default function QRLogin({ onSessionReady }) {
     try {
       const res = await fetch('/api/qr-session', { method: 'POST' })
       const data = await res.json()
-
       if (!res.ok) throw new Error(data.error)
       if (!mountedRef.current) return
 
-      setToken(data.token)
+      tokenRef.current = data.token
 
-      // Generate QR code with the token embedded as a URL
       const qrUrl = `${window.location.origin}?qr_token=${data.token}`
       const dataUrl = await QRCode.toDataURL(qrUrl, {
-        width: 220,
+        width: 200,
         margin: 2,
         color: { dark: '#000000', light: '#ffffff' },
         errorCorrectionLevel: 'M',
@@ -34,53 +32,58 @@ export default function QRLogin({ onSessionReady }) {
       if (!mountedRef.current) return
       setQrDataUrl(dataUrl)
       setStatus('waiting')
-    } catch (err) {
+    } catch {
       if (mountedRef.current) setStatus('error')
-      console.error('QR generation failed:', err)
     }
   }, [])
 
   // Poll for confirmation
   useEffect(() => {
-    if (status !== 'waiting' || !token) return
+    if (status !== 'waiting') return
 
     const poll = async () => {
+      if (!tokenRef.current || !mountedRef.current) return
+
       try {
-        const res = await fetch(`/api/qr-session?token=${token}`)
-        const data = await res.json()
+        const res = await fetch(`/api/qr-session?token=${tokenRef.current}`)
 
         if (!mountedRef.current) return
 
         if (res.status === 410) {
           setStatus('expired')
+          window.clearInterval(pollRef.current)
           return
         }
 
-        if (data.status === 'confirmed') {
-          setStatus('confirming')
+        const data = await res.json()
 
-          // Use the magic link to sign in
+        if (data.status === 'confirmed' && data.user_id) {
+          window.clearInterval(pollRef.current)
+          setStatus('signing-in')
+
+          // Sign in using the anonymous user credentials
+          // The user was created by the API — we need to sign in with the temp credentials
+          // Use the hashed_token/action_link if available, otherwise use email/password
           if (data.action_link) {
-            // Extract token_hash from action link and verify OTP
-            const url = new URL(data.action_link)
-            const tokenHash = url.searchParams.get('token_hash')
-            const type = url.searchParams.get('type') || 'magiclink'
+            // Extract and verify OTP from the magic link
+            try {
+              const url = new URL(data.action_link)
+              const tokenHash = url.searchParams.get('token_hash')
+              const type = url.searchParams.get('type') || 'magiclink'
 
-            const { error } = await supabase.auth.verifyOtp({
-              token_hash: tokenHash,
-              type,
-            })
-
-            if (error) {
-              console.error('OTP verification failed:', error.message)
-              setStatus('error')
-              return
+              await supabase.auth.verifyOtp({ token_hash: tokenHash, type })
+            } catch {
+              // Fallback: sign in with the anon credentials
+              const anonEmail = `anon-${data.user_id}@clipvault.temp`
+              const anonPassword = `anon-${tokenRef.current.slice(0, 32)}`
+              await supabase.auth.signInWithPassword({ email: anonEmail, password: anonPassword })
             }
-
-            // Session is now active — App.jsx onAuthStateChange will handle it
-            if (onSessionReady) onSessionReady()
+          } else {
+            // Sign in with constructed credentials
+            const anonEmail = `anon-${data.user_id}@clipvault.temp`
+            const anonPassword = `anon-${tokenRef.current.slice(0, 32)}`
+            await supabase.auth.signInWithPassword({ email: anonEmail, password: anonPassword })
           }
-          return
         }
       } catch {
         // Network error — keep polling
@@ -89,16 +92,13 @@ export default function QRLogin({ onSessionReady }) {
 
     pollRef.current = window.setInterval(poll, 2500)
 
-    return () => {
-      window.clearInterval(pollRef.current)
-    }
-  }, [status, token, onSessionReady])
+    return () => window.clearInterval(pollRef.current)
+  }, [status])
 
-  // Cleanup on unmount + initial generation
+  // Initial generation
   useEffect(() => {
     mountedRef.current = true
 
-    // Load initial QR on mount (async, no direct setState)
     const init = async () => {
       try {
         const res = await fetch('/api/qr-session', { method: 'POST' })
@@ -106,10 +106,10 @@ export default function QRLogin({ onSessionReady }) {
         if (!res.ok) throw new Error(data.error)
         if (!mountedRef.current) return
 
-        setToken(data.token)
+        tokenRef.current = data.token
         const qrUrl = `${window.location.origin}?qr_token=${data.token}`
         const dataUrl = await QRCode.toDataURL(qrUrl, {
-          width: 220, margin: 2,
+          width: 200, margin: 2,
           color: { dark: '#000000', light: '#ffffff' },
           errorCorrectionLevel: 'M',
         })
@@ -123,36 +123,39 @@ export default function QRLogin({ onSessionReady }) {
 
     init()
 
-    return () => { mountedRef.current = false }
+    return () => {
+      mountedRef.current = false
+      window.clearInterval(pollRef.current)
+    }
   }, [])
 
   return (
     <div className="qr-login">
-      <h3>Scan to log in</h3>
-      <p>Open ClipVault on your phone and scan this code</p>
+      <h3>Quick access</h3>
+      <p>Scan with your phone for a temporary session</p>
 
       <div className="qr-code-wrap">
         {status === 'generating' && <div className="qr-loader" />}
         {status === 'waiting' && qrDataUrl && (
-          <img src={qrDataUrl} alt="Login QR Code" width="220" height="220" />
+          <img src={qrDataUrl} alt="Login QR Code" width="200" height="200" />
         )}
-        {status === 'confirming' && <p className="qr-status">Signing in...</p>}
+        {status === 'signing-in' && <p className="qr-status">Signing in...</p>}
         {status === 'expired' && (
           <div className="qr-expired">
-            <p>QR code expired</p>
-            <button onClick={generateQR}>Generate new</button>
+            <p>QR expired</p>
+            <button onClick={generateQR}>New code</button>
           </div>
         )}
         {status === 'error' && (
           <div className="qr-expired">
-            <p>Something went wrong</p>
-            <button onClick={generateQR}>Try again</button>
+            <p>Failed to generate</p>
+            <button onClick={generateQR}>Retry</button>
           </div>
         )}
       </div>
 
       {status === 'waiting' && (
-        <p className="qr-hint">QR expires in 5 minutes</p>
+        <p className="qr-hint">No account needed. Expires in 5 min.</p>
       )}
     </div>
   )

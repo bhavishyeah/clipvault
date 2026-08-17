@@ -1342,3 +1342,46 @@
   font-size: 11px;
   color: var(--text-muted);
 }
+
+/* ==========================================================================
+   Anonymous Session Banner
+   ========================================================================== */
+
+.anon-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  margin-bottom: 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.anon-banner button {
+  flex-shrink: 0;
+  padding: 6px 14px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--text);
+  color: var(--bg);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.convert-desc {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+}
+
+@media (max-width: 768px) {
+  .anon-banner {
+    flex-direction: column;
+    text-align: center;
+    gap: 8px;
+  }
+}

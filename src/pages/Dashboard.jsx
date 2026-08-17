@@ -143,6 +143,13 @@ export default function Dashboard({ user }) {
 
   const { theme, toggleTheme } = useTheme()
 
+  const isAnonymous = user.user_metadata?.is_anonymous === true
+  const [showConvert, setShowConvert] = useState(false)
+  const [convertEmail, setConvertEmail] = useState('')
+  const [convertPassword, setConvertPassword] = useState('')
+  const [convertBusy, setConvertBusy] = useState(false)
+  const [convertError, setConvertError] = useState('')
+
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState('all')
   const [sortOrder, setSortOrder] = useState('newest')
@@ -302,7 +309,43 @@ export default function Dashboard({ user }) {
   }
 
   const signOutAll = async () => { await supabase.auth.signOut({ scope: 'global' }); setShowUserMenu(false) }
-  const signOut = async () => { await supabase.auth.signOut(); setShowUserMenu(false) }
+  const signOut = async () => {
+    if (isAnonymous) {
+      // Delete all data and the anonymous user
+      await fetch('/api/qr-logout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user.id }),
+      })
+    }
+    await supabase.auth.signOut()
+    setShowUserMenu(false)
+  }
+
+  const handleConvert = async (e) => {
+    e.preventDefault()
+    setConvertError('')
+    const email = convertEmail.trim().toLowerCase()
+    if (!email || convertPassword.length < 8) {
+      setConvertError('Enter email and password (8+ chars)')
+      return
+    }
+    setConvertBusy(true)
+
+    const { error } = await supabase.auth.updateUser({
+      email,
+      password: convertPassword,
+      data: { is_anonymous: false },
+    })
+
+    if (error) {
+      setConvertError(error.message)
+    } else {
+      toast('Account created! Your clips are now permanent.')
+      setShowConvert(false)
+    }
+    setConvertBusy(false)
+  }
 
   const getTypeIcon = (type) => {
     if (type === 'image') return <IconImage />
@@ -358,6 +401,14 @@ export default function Dashboard({ user }) {
             </div>
           </div>
         </header>
+
+        {/* Anonymous session banner */}
+        {isAnonymous && (
+          <div className="anon-banner">
+            <span>Temporary session — clips will be deleted on logout</span>
+            <button onClick={() => setShowConvert(true)}>Create account to keep clips</button>
+          </div>
+        )}
 
         <section className="welcome-row">
           <div className="welcome-left">
@@ -497,6 +548,29 @@ export default function Dashboard({ user }) {
       <ToastContainer />
       <ConfirmModal open={bulkConfirm} title={`Delete ${selectedIds.size} clips?`} message="All selected clips will be permanently removed." onConfirm={bulkDelete} onCancel={() => setBulkConfirm(false)} />
       <EditModal open={!!editTarget} clip={editTarget} onSave={editClip} onCancel={() => setEditTarget(null)} />
+
+      {/* Convert anonymous to permanent account */}
+      {showConvert && (
+        <div className="confirm-overlay" onClick={() => setShowConvert(false)}>
+          <div className="edit-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Create permanent account</h3>
+            <p className="convert-desc">Your clips will be saved permanently.</p>
+            <form onSubmit={handleConvert}>
+              <label htmlFor="convert-email">Email</label>
+              <input id="convert-email" type="email" required placeholder="you@example.com" value={convertEmail} onChange={(e) => setConvertEmail(e.target.value)} className="edit-textarea" style={{ minHeight: 'auto', padding: '10px 12px' }} />
+              <label htmlFor="convert-pass">Password</label>
+              <input id="convert-pass" type="password" required placeholder="8+ characters" value={convertPassword} onChange={(e) => setConvertPassword(e.target.value)} className="edit-textarea" style={{ minHeight: 'auto', padding: '10px 12px' }} />
+              {convertError && <p style={{ color: 'var(--danger)', fontSize: 13, marginTop: 8 }}>{convertError}</p>}
+              <div className="confirm-actions" style={{ marginTop: 16 }}>
+                <button type="button" className="confirm-cancel" onClick={() => setShowConvert(false)}>Cancel</button>
+                <button type="submit" className="confirm-delete" style={{ background: 'var(--text)' }} disabled={convertBusy}>
+                  {convertBusy ? 'Creating...' : 'Create account'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </main>
   )
 }
