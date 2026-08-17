@@ -57,33 +57,17 @@ export default function QRLogin() {
 
         const data = await res.json()
 
-        if (data.status === 'confirmed' && data.user_id) {
+        if (data.status === 'confirmed' && data.email) {
           window.clearInterval(pollRef.current)
           setStatus('signing-in')
 
-          // Sign in using the anonymous user credentials
-          // The user was created by the API — we need to sign in with the temp credentials
-          // Use the hashed_token/action_link if available, otherwise use email/password
-          if (data.action_link) {
-            // Extract and verify OTP from the magic link
-            try {
-              const url = new URL(data.action_link)
-              const tokenHash = url.searchParams.get('token_hash')
-              const type = url.searchParams.get('type') || 'magiclink'
-
-              await supabase.auth.verifyOtp({ token_hash: tokenHash, type })
-            } catch {
-              // Fallback: sign in with the anon credentials
-              const anonEmail = `anon-${data.user_id}@clipvault.temp`
-              const anonPassword = `anon-${tokenRef.current.slice(0, 32)}`
-              await supabase.auth.signInWithPassword({ email: anonEmail, password: anonPassword })
-            }
-          } else {
-            // Sign in with constructed credentials
-            const anonEmail = `anon-${data.user_id}@clipvault.temp`
-            const anonPassword = `anon-${tokenRef.current.slice(0, 32)}`
-            await supabase.auth.signInWithPassword({ email: anonEmail, password: anonPassword })
-          }
+          // Sign in with the anonymous user credentials
+          // Password is derived from the QR token
+          const anonPassword = `anon-${tokenRef.current.slice(0, 32)}`
+          await supabase.auth.signInWithPassword({
+            email: data.email,
+            password: anonPassword,
+          })
         }
       } catch {
         // Network error — keep polling

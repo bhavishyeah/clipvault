@@ -51,21 +51,13 @@ export default async function handler(req, res) {
         return res.status(410).json({ error: 'Session expired' })
       }
 
-      // If confirmed, return the anonymous session credentials
+      // If confirmed, return credentials for desktop to sign in
       if (data.status === 'confirmed' && data.user_id) {
-        // Generate a new session for this anonymous user (for desktop)
-        const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
-          type: 'magiclink',
-          email: `anon-${data.user_id}@clipvault.temp`,
-          options: { data: { is_anonymous: true } },
-        })
+        // Get the anonymous user's email
+        const { data: userData, error: userError } = await supabase.auth.admin.getUserById(data.user_id)
 
-        if (linkError) {
-          // Fallback: return user_id so desktop can use it
-          return res.status(200).json({
-            status: 'confirmed',
-            user_id: data.user_id,
-          })
+        if (userError || !userData?.user) {
+          return res.status(500).json({ error: 'User not found' })
         }
 
         // Delete the QR session (one-time use)
@@ -74,8 +66,7 @@ export default async function handler(req, res) {
         return res.status(200).json({
           status: 'confirmed',
           user_id: data.user_id,
-          action_link: linkData.properties?.action_link || null,
-          hashed_token: linkData.properties?.hashed_token || null,
+          email: userData.user.email,
         })
       }
 
