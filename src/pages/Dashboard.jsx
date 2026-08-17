@@ -61,6 +61,43 @@ const formatBytes = (bytes) => {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+function DesktopPasteInput({ onSave, saving }) {
+  const [text, setText] = useState('')
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    const value = text.trim()
+    if (!value || saving) return
+    await onSave(value)
+    setText('')
+  }
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      handleSubmit(e)
+    }
+  }
+
+  return (
+    <form className="desktop-input-form" onSubmit={handleSubmit}>
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={handleKeyDown}
+        placeholder="Paste or type text, links..."
+        rows={3}
+        maxLength={10000}
+      />
+      <div className="desktop-input-footer">
+        <span className="desktop-input-hint">Ctrl + Enter to save</span>
+        <button type="submit" disabled={!text.trim() || saving}>
+          {saving ? 'Saving...' : 'Save'}
+        </button>
+      </div>
+    </form>
+  )
+}
+
 export default function Dashboard({ user }) {
   const {
     clips, loading, saving, uploadProgress,
@@ -231,38 +268,25 @@ export default function Dashboard({ user }) {
         </header>
 
         <section className="welcome-row">
-          <div>
+          <div className="welcome-left">
             <p className="eyebrow">Your vault</p>
             <h1>Everything you copy,<br /><span>within reach.</span></h1>
             <p className="welcome-copy">Save text, links and images. Access them from any device, anytime.</p>
-          </div>
-          <div className="clip-count">
-            <strong>{clips.length}</strong>
-            <span>clips</span>
-          </div>
-        </section>
-
-        <section className="capture-row">
-          <div className="capture-card">
-            <div className="capture-content">
-              <div className="capture-icon"><IconClipboard /></div>
-              <div>
-                <h2>Capture something</h2>
-                <p>Paste anywhere on this page to save instantly.</p>
-                <div className="capture-hints">
-                  <div className="desktop-hint"><strong>Desktop:</strong> Ctrl + V anywhere</div>
-                  <div className="mobile-hint"><strong>Mobile:</strong> Use the input below</div>
-                </div>
-              </div>
+            <div className="welcome-meta">
+              <span className="clip-count-inline"><strong>{clips.length}</strong> clips</span>
             </div>
-            <div className="shortcut-hint"><kbd>Ctrl</kbd><span>+</span><kbd>V</kbd></div>
-            {saving && <div className="saving-label">{uploadProgress > 0 ? `Uploading ${uploadProgress}%` : 'Saving...'}</div>}
-            <MobilePasteBox onSave={saveText} onImage={saveImage} saving={saving} />
-            <PasteZone onText={saveText} onImage={saveImage} />
           </div>
 
-          <ImageUpload onImage={saveImage} saving={saving} />
+          <div className="welcome-right">
+            <div className="desktop-paste-box">
+              <DesktopPasteInput onSave={saveText} saving={saving} />
+            </div>
+            <ImageUpload onImage={saveImage} saving={saving} />
+          </div>
         </section>
+
+        <PasteZone onText={saveText} onImage={saveImage} />
+        <MobilePasteBox onSave={saveText} onImage={saveImage} saving={saving} />
 
         {saving && uploadProgress > 0 && (
           <div className="upload-progress-bar"><div className="upload-progress-fill" style={{ width: `${uploadProgress}%` }} /></div>
