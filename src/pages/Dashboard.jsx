@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useClips } from '../hooks/useClips'
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
+import { useTheme } from '../hooks/useTheme'
 import PasteZone from '../components/clips/PasteZone'
 import MobilePasteBox from '../components/clips/MobilePasteBox'
 import ImageUpload from '../components/clips/ImageUpload'
@@ -24,7 +25,6 @@ const getInitials = (email = '') => {
   return email.slice(0, 2).toUpperCase()
 }
 
-// Extract a favicon URL for link previews
 const getFaviconUrl = (url) => {
   try {
     const domain = url?.replace(/^https?:\/\//, '').split('/')[0]
@@ -33,6 +33,26 @@ const getFaviconUrl = (url) => {
   } catch {
     return null
   }
+}
+
+// Calculate storage usage from clip metadata
+const calculateStorageUsage = (clips) => {
+  let totalBytes = 0
+  let imageCount = 0
+  clips.forEach((clip) => {
+    if (clip.metadata?.bytes) {
+      totalBytes += clip.metadata.bytes
+      imageCount++
+    }
+  })
+  return { totalBytes, imageCount }
+}
+
+const formatBytes = (bytes) => {
+  if (bytes === 0) return '0 B'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 export default function Dashboard({ user }) {
@@ -49,11 +69,16 @@ export default function Dashboard({ user }) {
     setExpiration,
   } = useClips(user)
 
+  const { theme, toggleTheme } = useTheme()
+
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState('all')
   const [confirmTarget, setConfirmTarget] = useState(null)
   const [editTarget, setEditTarget] = useState(null)
   const [showUserMenu, setShowUserMenu] = useState(false)
+  const [bulkMode, setBulkMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState(new Set())
+  const [bulkConfirm, setBulkConfirm] = useState(false)
   const searchTimer = useRef(null)
   const searchInputRef = useRef(null)
   const [debouncedQuery, setDebouncedQuery] = useState('')
@@ -68,6 +93,10 @@ export default function Dashboard({ user }) {
       setShowUserMenu(false)
       setConfirmTarget(null)
       setEditTarget(null)
+      if (bulkMode) {
+        setBulkMode(false)
+        setSelectedIds(new Set())
+      }
     },
   })
 
@@ -101,7 +130,7 @@ export default function Dashboard({ user }) {
     }
   }, [saveText])
 
-  // Debounced search for performance
+  // Debounced search
   const handleSearchChange = (e) => {
     const value = e.target.value
     setQuery(value)
@@ -113,20 +142,19 @@ export default function Dashboard({ user }) {
 
   const filteredClips = useMemo(() => {
     const normalizedQuery = debouncedQuery.trim().toLowerCase()
-
     return clips.filter((clip) => {
       const matchesType = filter === 'all' || clip.type === filter
       const matchesQuery =
         !normalizedQuery ||
         clip.content?.toLowerCase().includes(normalizedQuery) ||
         clip.metadata?.mime?.toLowerCase().includes(normalizedQuery)
-
       return matchesType && matchesQuery
     })
   }, [clips, filter, debouncedQuery])
 
-  // --- Clipboard actions ---
+  const storageUsage = useMemo(() => calculateStorageUsage(clips), [clips])
 
+  // --- Clipboard actions ---
   const copyClip = useCallback(async (clip) => {
     try {
       if (clip.type === 'image' && clip.url) {
@@ -136,13 +164,10 @@ export default function Dashboard({ user }) {
         }
         const response = await fetch(clip.url)
         const blob = await response.blob()
-        await navigator.clipboard.write([
-          new ClipboardItem({ [blob.type]: blob }),
-        ])
+        await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })])
         toast('Image copied')
         return
       }
-
       await navigator.clipboard.writeText(clip.content ?? '')
       toast('Copied to clipboard')
     } catch (err) {
@@ -153,13 +178,11 @@ export default function Dashboard({ user }) {
 
   const downloadClip = useCallback(async (clip) => {
     if (!clip.url) return
-
     try {
       const response = await fetch(clip.url)
       const blob = await response.blob()
       const objectUrl = URL.createObjectURL(blob)
       const link = document.createElement('a')
-
       link.href = objectUrl
       link.download = clip.file_path?.split('/').pop() || `clipvault-${Date.now()}.${clip.metadata?.format || 'png'}`
       document.body.appendChild(link)
@@ -178,40 +201,80 @@ export default function Dashboard({ user }) {
     window.open(url, '_blank', 'noopener,noreferrer')
   }, [])
 
-  // --- Delete with confirmation ---
+  // --- Delete ---
   const handleDeleteClick = (clip) => setConfirmTarget(clip)
   const confirmDelete = () => {
-    if (confirmTarget) {
-      removeClip(confirmTarget)
-      setConfirmTarget(null)
-    }
+    if (confirmTarget) { removeClip(confirmTarget); setConfirmTarget(null) }
   }
 
   // --- Edit ---
   const handleEditClick = (clip) => {
-    if (clip.type === 'image') return // Can't edit images
+    if (clip.type === 'image') return
     setEditTarget(clip)
   }
 
   // --- Expiration ---
   const handleSetExpiry = (clip, days) => {
-    if (days === null) {
-      setExpiration(clip, null)
-    } else {
+    if (days === null) { setExpiration(clip, null) }
+    else {
       const date = new Date()
       date.setDate(date.getDate() + days)
       setExpiration(clip, date.toISOString())
     }
   }
 
+  // --- Bulk actions ---
+  const toggleSelect = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const selectAll = () => {
+    setSelectedIds(new Set(filteredClips.map((c) => c.id)))
+  }
+
+  const bulkDelete = () => {
+    selectedIds.forEach((id) => {
+      const clip = clips.find((c) => c.id === id)
+      if (clip) removeClip(clip)
+    })
+    setSelectedIds(new Set())
+    setBulkMode(false)
+    setBulkConfirm(false)
+  }
+
+  const exportVault = () => {
+    const exportData = clips.map((clip) => ({
+      type: clip.type,
+      content: clip.content || null,
+      url: clip.url || null,
+      is_pinned: clip.is_pinned,
+      created_at: clip.created_at,
+      expires_at: clip.expires_at,
+      metadata: clip.metadata,
+    }))
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `clipvault-export-${new Date().toISOString().slice(0, 10)}.json`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+    toast('Vault exported')
+  }
+
   // --- Auth ---
   const signOutAllDevices = async () => {
     const { error } = await supabase.auth.signOut({ scope: 'global' })
-    if (error) {
-      toast('Failed to sign out from all devices', 'error')
-    } else {
-      toast('Signed out from all devices')
-    }
+    if (error) toast('Failed to sign out from all devices', 'error')
+    else toast('Signed out from all devices')
     setShowUserMenu(false)
   }
 
@@ -236,6 +299,13 @@ export default function Dashboard({ user }) {
           </div>
 
           <div className="topbar-actions">
+            <button
+              className="theme-toggle"
+              onClick={toggleTheme}
+              title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+            >
+              {theme === 'dark' ? '☀' : '◗'}
+            </button>
             <div className="sync-status">
               <span className="status-dot" />
               Synced
@@ -253,6 +323,11 @@ export default function Dashboard({ user }) {
 
               {showUserMenu && (
                 <div className="user-dropdown">
+                  <div className="dropdown-storage">
+                    <span>Storage: {formatBytes(storageUsage.totalBytes)}</span>
+                    <span>{storageUsage.imageCount} images</span>
+                  </div>
+                  <button onClick={exportVault}>Export vault (JSON)</button>
                   <button onClick={signOut}>Sign out</button>
                   <button onClick={signOutAllDevices}>Sign out all devices</button>
                 </div>
@@ -308,14 +383,12 @@ export default function Dashboard({ user }) {
           <PasteZone onText={saveText} onImage={saveImage} />
         </section>
 
-        {/* Upload progress bar */}
         {saving && uploadProgress > 0 && (
           <div className="upload-progress-bar">
             <div className="upload-progress-fill" style={{ width: `${uploadProgress}%` }} />
           </div>
         )}
 
-        {/* Desktop image upload zone */}
         <ImageUpload onImage={saveImage} saving={saving} />
 
         <section className="toolbar">
@@ -344,8 +417,24 @@ export default function Dashboard({ user }) {
                 </button>
               ))}
             </div>
+            <button
+              className={`bulk-toggle ${bulkMode ? 'active' : ''}`}
+              onClick={() => { setBulkMode(!bulkMode); setSelectedIds(new Set()) }}
+              title="Bulk select"
+            >
+              ☐
+            </button>
           </div>
         </section>
+
+        {/* Bulk action bar */}
+        {bulkMode && selectedIds.size > 0 && (
+          <div className="bulk-bar">
+            <span>{selectedIds.size} selected</span>
+            <button onClick={selectAll}>Select all</button>
+            <button className="bulk-delete" onClick={() => setBulkConfirm(true)}>Delete selected</button>
+          </div>
+        )}
 
         {loading ? (
           <div className="empty-state"><div className="loader" />Loading your vault…</div>
@@ -358,8 +447,17 @@ export default function Dashboard({ user }) {
         ) : (
           <section className="clip-grid">
             {filteredClips.map((clip) => (
-              <article className={`clip-card clip-${clip.type}`} key={clip.id}>
+              <article
+                className={`clip-card clip-${clip.type} ${selectedIds.has(clip.id) ? 'selected' : ''}`}
+                key={clip.id}
+                onClick={bulkMode ? () => toggleSelect(clip.id) : undefined}
+              >
                 <div className="clip-card-top">
+                  {bulkMode && (
+                    <span className={`bulk-checkbox ${selectedIds.has(clip.id) ? 'checked' : ''}`}>
+                      {selectedIds.has(clip.id) ? '✓' : ''}
+                    </span>
+                  )}
                   <span className="type-pill">
                     <span className="type-symbol">{clip.type === 'image' ? '▧' : clip.type === 'link' ? '↗' : '≡'}</span>
                     {clip.type}
@@ -371,7 +469,7 @@ export default function Dashboard({ user }) {
                     <button
                       className={`pin-button ${clip.is_pinned ? 'pinned' : ''}`}
                       title={clip.is_pinned ? 'Unpin clip' : 'Pin clip'}
-                      onClick={() => togglePin(clip)}
+                      onClick={(e) => { e.stopPropagation(); togglePin(clip) }}
                     >
                       {clip.is_pinned ? '★' : '☆'}
                     </button>
@@ -384,14 +482,7 @@ export default function Dashboard({ user }) {
                   </div>
                 ) : clip.type === 'link' ? (
                   <div className="link-preview">
-                    <img
-                      src={getFaviconUrl(clip.content)}
-                      alt=""
-                      className="link-favicon"
-                      width="16"
-                      height="16"
-                      loading="lazy"
-                    />
+                    <img src={getFaviconUrl(clip.content)} alt="" className="link-favicon" width="16" height="16" loading="lazy" />
                     <div className="link-preview-text">
                       <p className="clip-content">{clip.content}</p>
                       <div className="link-domain">{clip.content?.replace(/^https?:\/\//, '').split('/')[0]}</div>
@@ -401,25 +492,25 @@ export default function Dashboard({ user }) {
                   <p className="clip-content">{clip.content}</p>
                 )}
 
-                <div className="clip-card-bottom">
-                  <time>{formatDate(clip.created_at)}</time>
-                  <div className="clip-actions">
-                    <button onClick={() => copyClip(clip)}>Copy</button>
-                    {clip.type !== 'image' && (
-                      <button onClick={() => handleEditClick(clip)}>Edit</button>
-                    )}
-                    {clip.type === 'link' && <button onClick={() => openLink(clip.content)}>Open</button>}
-                    {clip.type === 'image' && <button onClick={() => downloadClip(clip)}>Download</button>}
-                    <button
-                      className="expiry-action"
-                      onClick={() => handleSetExpiry(clip, clip.expires_at ? null : 7)}
-                      title={clip.expires_at ? 'Remove expiry' : 'Expire in 7 days'}
-                    >
-                      {clip.expires_at ? '∞' : '⏱'}
-                    </button>
-                    <button className="delete-action" onClick={() => handleDeleteClick(clip)}>Delete</button>
+                {!bulkMode && (
+                  <div className="clip-card-bottom">
+                    <time>{formatDate(clip.created_at)}</time>
+                    <div className="clip-actions">
+                      <button onClick={() => copyClip(clip)}>Copy</button>
+                      {clip.type !== 'image' && <button onClick={() => handleEditClick(clip)}>Edit</button>}
+                      {clip.type === 'link' && <button onClick={() => openLink(clip.content)}>Open</button>}
+                      {clip.type === 'image' && <button onClick={() => downloadClip(clip)}>Download</button>}
+                      <button
+                        className="expiry-action"
+                        onClick={() => handleSetExpiry(clip, clip.expires_at ? null : 7)}
+                        title={clip.expires_at ? 'Remove expiry' : 'Expire in 7 days'}
+                      >
+                        {clip.expires_at ? '∞' : '⏱'}
+                      </button>
+                      <button className="delete-action" onClick={() => handleDeleteClick(clip)}>Delete</button>
+                    </div>
                   </div>
-                </div>
+                )}
               </article>
             ))}
           </section>
@@ -438,6 +529,14 @@ export default function Dashboard({ user }) {
         message="This clip will be permanently removed. This cannot be undone."
         onConfirm={confirmDelete}
         onCancel={() => setConfirmTarget(null)}
+      />
+
+      <ConfirmModal
+        open={bulkConfirm}
+        title={`Delete ${selectedIds.size} clips?`}
+        message="All selected clips will be permanently removed. This cannot be undone."
+        onConfirm={bulkDelete}
+        onCancel={() => setBulkConfirm(false)}
       />
 
       <EditModal
