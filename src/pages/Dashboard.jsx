@@ -46,10 +46,7 @@ const calculateStorageUsage = (clips) => {
   let totalBytes = 0
   let imageCount = 0
   clips.forEach((clip) => {
-    if (clip.metadata?.bytes) {
-      totalBytes += clip.metadata.bytes
-      imageCount++
-    }
+    if (clip.metadata?.bytes) { totalBytes += clip.metadata.bytes; imageCount++ }
   })
   return { totalBytes, imageCount }
 }
@@ -61,13 +58,48 @@ const formatBytes = (bytes) => {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function DesktopPasteInput({ onSave, saving }) {
+// Detect if content looks like code
+const isCodeSnippet = (text) => {
+  if (!text) return false
+  const codeSignals = [
+    /^(import|export|const|let|var|function|class|if|for|while|return|async|await)\s/m,
+    /[{}[\]();].*[{}[\]();]/,
+    /=>/,
+    /^\s*(\/\/|\/\*|#!)/m,
+    /<\/?[a-z][\w-]*[\s>]/i,
+    /\.\w+\(.*\)/,
+  ]
+  let matches = 0
+  for (const pattern of codeSignals) {
+    if (pattern.test(text)) matches++
+  }
+  return matches >= 2
+}
+
+// Desktop paste input with char count, auto-focus, duplicate detection
+function DesktopPasteInput({ onSave, saving, clips }) {
   const [text, setText] = useState('')
+  const textareaRef = useRef(null)
+
+  // Auto-focus on mount
+  useEffect(() => {
+    textareaRef.current?.focus()
+  }, [])
+
+  const isDuplicate = useMemo(() => {
+    const trimmed = text.trim().toLowerCase()
+    if (!trimmed) return false
+    return clips.some((c) => c.content?.toLowerCase() === trimmed)
+  }, [text, clips])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     const value = text.trim()
     if (!value || saving) return
+    if (isDuplicate) {
+      toast('This clip already exists in your vault', 'info')
+      return
+    }
     await onSave(value)
     setText('')
   }
@@ -81,6 +113,7 @@ function DesktopPasteInput({ onSave, saving }) {
   return (
     <form className="desktop-input-form" onSubmit={handleSubmit}>
       <textarea
+        ref={textareaRef}
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={handleKeyDown}
@@ -90,7 +123,9 @@ function DesktopPasteInput({ onSave, saving }) {
         maxLength={10000}
       />
       <div className="desktop-input-footer">
-        <span className="desktop-input-hint">Ctrl + Enter to save</span>
+        <span className="desktop-input-hint">
+          {isDuplicate ? 'Duplicate detected' : `${text.length}/10000`}
+        </span>
         <button type="submit" disabled={!text.trim() || saving}>
           {saving ? 'Saving...' : 'Save'}
         </button>
@@ -109,12 +144,14 @@ export default function Dashboard({ user }) {
 
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState('all')
-  const [confirmTarget, setConfirmTarget] = useState(null)
+  const [sortOrder, setSortOrder] = useState('newest')
   const [editTarget, setEditTarget] = useState(null)
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [bulkMode, setBulkMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
+  const [undoClip, setUndoClip] = useState(null)
+  const undoTimer = useRef(null)
   const searchTimer = useRef(null)
   const searchInputRef = useRef(null)
   const [debouncedQuery, setDebouncedQuery] = useState('')
@@ -124,7 +161,7 @@ export default function Dashboard({ user }) {
     searchRef: searchInputRef,
     onEscape: () => {
       setQuery(''); setDebouncedQuery(''); setShowUserMenu(false)
-      setConfirmTarget(null); setEditTarget(null)
+      setEditTarget(null)
       if (bulkMode) { setBulkMode(false); setSelectedIds(new Set()) }
     },
   })
@@ -156,12 +193,28 @@ export default function Dashboard({ user }) {
 
   const filteredClips = useMemo(() => {
     const q = debouncedQuery.trim().toLowerCase()
-    return clips.filter((clip) => {
+    let result = clips.filter((clip) => {
       const matchesType = filter === 'all' || clip.type === filter
       const matchesQuery = !q || clip.content?.toLowerCase().includes(q) || clip.metadata?.mime?.toLowerCase().includes(q)
       return matchesType && matchesQuery
     })
-  }, [clips, filter, debouncedQuery])
+
+    // Sort (pinned always first, then by sortOrder)
+    if (sortOrder === 'oldest') {
+      result = [...result].sort((a, b) => {
+        if (a.is_pinned !== b.is_pinned) return a.is_pinned ? -1 : 1
+        return new Date(a.created_at) - new Date(b.created_at)
+      })
+    } else if (sortOrder === 'alpha') {
+      result = [...result].sort((a, b) => {
+        if (a.is_pinned !== b.is_pinned) return a.is_pinned ? -1 : 1
+        return (a.content || '').localeCompare(b.content || '')
+      })
+    }
+    // 'newest' is default from useClips hook
+
+    return result
+  }, [clips, filter, debouncedQuery, sortOrder])
 
   const storageUsage = useMemo(() => calculateStorageUsage(clips), [clips])
 
@@ -199,8 +252,33 @@ export default function Dashboard({ user }) {
     window.open(url, '_blank', 'noopener,noreferrer')
   }, [])
 
-  const handleDeleteClick = (clip) => setConfirmTarget(clip)
-  const confirmDelete = () => { if (confirmTarget) { removeClip(confirmTarget); setConfirmTarget(null) } }
+  // --- Delete with undo ---
+  const handleDeleteClick = (clip) => {
+    // Remove from UI immediately
+    setUndoClip(clip)
+    removeClip(clip)
+
+    // Clear any existing undo timer
+    window.clearTimeout(undoTimer.current)
+    undoTimer.current = window.setTimeout(() => {
+      setUndoClip(null)
+    }, 5000)
+  }
+
+  const handleUndo = () => {
+    if (!undoClip) return
+    // Re-save the clip
+    if (undoClip.type === 'image') {
+      // Can't easily undo image deletion, just inform
+      toast('Cannot undo image deletion', 'error')
+    } else {
+      saveText(undoClip.content)
+      toast('Clip restored')
+    }
+    window.clearTimeout(undoTimer.current)
+    setUndoClip(null)
+  }
+
   const handleEditClick = (clip) => { if (clip.type !== 'image') setEditTarget(clip) }
 
   const handleSetExpiry = (clip, days) => {
@@ -228,6 +306,17 @@ export default function Dashboard({ user }) {
     if (type === 'image') return <IconImage />
     if (type === 'link') return <IconLink />
     return <IconText />
+  }
+
+  // Empty state messages per filter
+  const getEmptyMessage = () => {
+    if (query) return { title: 'No results', desc: 'Try a different search term.' }
+    switch (filter) {
+      case 'text': return { title: 'No text clips', desc: 'Save some text to see it here.' }
+      case 'link': return { title: 'No links saved', desc: 'Paste a URL to save it.' }
+      case 'image': return { title: 'No images yet', desc: 'Upload or paste an image.' }
+      default: return { title: 'Empty vault', desc: 'Your first clip will appear here.' }
+    }
   }
 
   return (
@@ -280,7 +369,7 @@ export default function Dashboard({ user }) {
 
           <div className="welcome-right">
             <div className="desktop-paste-box">
-              <DesktopPasteInput onSave={saveText} saving={saving} />
+              <DesktopPasteInput onSave={saveText} saving={saving} clips={clips} />
             </div>
             <ImageUpload onImage={saveImage} saving={saving} />
           </div>
@@ -310,6 +399,11 @@ export default function Dashboard({ user }) {
                 </button>
               ))}
             </div>
+            <select className="sort-select" value={sortOrder} onChange={(e) => setSortOrder(e.target.value)}>
+              <option value="newest">Newest</option>
+              <option value="oldest">Oldest</option>
+              <option value="alpha">A-Z</option>
+            </select>
             <button className={`bulk-toggle ${bulkMode ? 'active' : ''}`} onClick={() => { setBulkMode(!bulkMode); setSelectedIds(new Set()) }} title="Select multiple">
               <IconCheck />
             </button>
@@ -329,8 +423,8 @@ export default function Dashboard({ user }) {
         ) : filteredClips.length === 0 ? (
           <div className="empty-state">
             <div className="empty-icon"><IconClipboard width="28" height="28" /></div>
-            <h3>{query || filter !== 'all' ? 'No matching clips' : 'Empty vault'}</h3>
-            <p>{query || filter !== 'all' ? 'Try a different search.' : 'Your first clip will appear here.'}</p>
+            <h3>{getEmptyMessage().title}</h3>
+            <p>{getEmptyMessage().desc}</p>
           </div>
         ) : (
           <SortableClipGrid
@@ -362,7 +456,7 @@ export default function Dashboard({ user }) {
                     </div>
                   </div>
                 ) : (
-                  <p className="clip-content">{clip.content}</p>
+                  <p className={`clip-content ${isCodeSnippet(clip.content) ? 'code-snippet' : ''}`}>{clip.content}</p>
                 )}
 
                 {!bulkMode && (
@@ -385,13 +479,20 @@ export default function Dashboard({ user }) {
           />
         )}
 
+        {/* Undo delete toast */}
+        {undoClip && (
+          <div className="undo-bar">
+            <span>Clip deleted</span>
+            <button onClick={handleUndo}>Undo</button>
+          </div>
+        )}
+
         <footer className="vault-footer">
           <span>Private by design</span>
         </footer>
       </div>
 
       <ToastContainer />
-      <ConfirmModal open={!!confirmTarget} title="Delete this clip?" message="This action cannot be undone." onConfirm={confirmDelete} onCancel={() => setConfirmTarget(null)} />
       <ConfirmModal open={bulkConfirm} title={`Delete ${selectedIds.size} clips?`} message="All selected clips will be permanently removed." onConfirm={bulkDelete} onCancel={() => setBulkConfirm(false)} />
       <EditModal open={!!editTarget} clip={editTarget} onSave={editClip} onCancel={() => setEditTarget(null)} />
     </main>

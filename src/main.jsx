@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import { registerSW } from 'virtual:pwa-register'
 import App from './App.jsx'
+import ErrorBoundary from './components/ui/ErrorBoundary.jsx'
 
 registerSW({
   immediate: true,
@@ -10,6 +11,8 @@ registerSW({
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 )

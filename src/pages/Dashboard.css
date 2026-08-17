@@ -676,25 +676,6 @@
   gap: 12px;
 }
 
-.clip-card {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 18px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  transition: border-color .15s;
-}
-
-.clip-card:hover {
-  border-color: var(--border-hover);
-}
-
-.clip-card.selected {
-  border-color: var(--text);
-}
-
 .clip-card-top {
   display: flex;
   align-items: center;
@@ -1211,5 +1192,153 @@
   font-family: var(--font-display);
   font-size: 14px;
   letter-spacing: -.3px;
+  color: var(--text-muted);
+}
+
+/* ==========================================================================
+   Sort Select
+   ========================================================================== */
+
+.sort-select {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+}
+
+.sort-select:focus { border-color: var(--border-hover); }
+
+/* ==========================================================================
+   Undo Bar
+   ========================================================================== */
+
+.undo-bar {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 8px 30px rgba(0,0,0,.25);
+  animation: toast-in .2s ease-out;
+}
+
+.undo-bar span {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.undo-bar button {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.undo-bar button:hover {
+  border-color: var(--border-hover);
+  background: var(--accent-subtle);
+}
+
+/* ==========================================================================
+   Code Snippet Detection
+   ========================================================================== */
+
+.clip-content.code-snippet {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  background: var(--surface-2);
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  white-space: pre-wrap;
+  tab-size: 2;
+}
+
+/* ==========================================================================
+   Clip Card Hover Animation
+   ========================================================================== */
+
+.clip-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  transition: border-color .15s, transform .15s, box-shadow .15s;
+}
+
+.clip-card:hover {
+  border-color: var(--border-hover);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0,0,0,.1);
+}
+
+.clip-card.selected {
+  border-color: var(--text);
+  transform: none;
+}
+
+/* ==========================================================================
+   Error Boundary
+   ========================================================================== */
+
+.error-boundary {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 32px;
+  text-align: center;
+  background: var(--bg);
+}
+
+.error-boundary h2 {
+  font-family: var(--font-heading);
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.error-boundary p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin-bottom: 20px;
+}
+
+.error-boundary button {
+  padding: 10px 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--text);
+  color: var(--bg);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* ==========================================================================
+   Duplicate warning in desktop input
+   ========================================================================== */
+
+.desktop-input-hint {
+  font-size: 11px;
   color: var(--text-muted);
 }
