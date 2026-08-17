@@ -232,12 +232,13 @@
   font-weight: 600;
   line-height: 1.05;
   letter-spacing: -1.5px;
-  background: linear-gradient(90deg, #f43f5e, #a855f7, #3b82f6, #10b981, #f59e0b, #f43f5e);
-  background-size: 300% auto;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  animation: gradient-shift 8s linear infinite;
+  color: transparent;
+  background: linear-gradient(90deg, #f43f5e, #a855f7, #3b82f6, #10b981, #f59e0b, #f43f5e) !important;
+  background-size: 300% auto !important;
+  -webkit-background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  background-clip: text !important;
+  animation: gradient-shift 8s linear infinite !important;
 }
 
 @keyframes gradient-shift {
@@ -246,7 +247,8 @@
 }
 
 .welcome-row h1 span {
-  -webkit-text-fill-color: transparent;
+  -webkit-text-fill-color: transparent !important;
+  color: transparent;
 }
 
 .welcome-copy {

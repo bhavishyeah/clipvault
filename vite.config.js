@@ -56,6 +56,8 @@ export default defineConfig({
       workbox: {
         cleanupOutdatedCaches: true,
         navigateFallback: '/index.html',
+        skipWaiting: true,
+        clientsClaim: true,
 
         // Runtime caching for offline support
         runtimeCaching: [
