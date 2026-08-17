@@ -308,17 +308,29 @@ export default function Dashboard({ user }) {
     toast('Vault exported')
   }
 
-  const signOutAll = async () => { await supabase.auth.signOut({ scope: 'global' }); setShowUserMenu(false) }
-  const signOut = async () => {
+  const signOutAll = async () => {
     if (isAnonymous) {
-      // Delete all data and the anonymous user
       await fetch('/api/qr-logout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: user.id }),
       })
     }
-    await supabase.auth.signOut()
+    await supabase.auth.signOut({ scope: 'global' })
+    setShowUserMenu(false)
+  }
+  const signOut = async () => {
+    if (isAnonymous) {
+      // Anonymous: always destroy everything on any sign out
+      await fetch('/api/qr-logout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user.id }),
+      })
+      await supabase.auth.signOut({ scope: 'global' })
+    } else {
+      await supabase.auth.signOut({ scope: 'local' })
+    }
     setShowUserMenu(false)
   }
 
