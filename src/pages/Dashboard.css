@@ -2031,3 +2031,42 @@ kbd {
 [data-theme="light"] .saving-label {
   color: #15803d;
 }
+
+/* ==========================================================================
+   Drag Handle for Pinned Clips
+   ========================================================================== */
+
+.drag-handle {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  color: #66687b;
+  background: transparent;
+  font-size: 16px;
+  cursor: grab;
+  touch-action: none;
+  transition: color .15s, background .15s;
+}
+
+.drag-handle:hover {
+  color: #b8b0ff;
+  background: #7567ff1a;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+[data-theme="light"] .drag-handle {
+  color: #9ca3af;
+}
+
+[data-theme="light"] .drag-handle:hover {
+  color: #6366f1;
+  background: #ede9ff;
+}

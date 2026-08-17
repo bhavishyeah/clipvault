@@ -11,7 +11,13 @@ const isUrl = (text) =>
 
 function sortClips(list) {
   return [...list].sort((a, b) => {
+    // Pinned clips come first
     if (a.is_pinned !== b.is_pinned) return a.is_pinned ? -1 : 1
+    // Among pinned clips, sort by pin_order (lower = higher priority)
+    if (a.is_pinned && b.is_pinned) {
+      return (a.pin_order ?? 0) - (b.pin_order ?? 0)
+    }
+    // Among unpinned clips, sort by newest first
     return new Date(b.created_at) - new Date(a.created_at)
   })
 }
@@ -353,6 +359,34 @@ export function useClips(user) {
     }
   }, [])
 
+  // --- Reorder pinned clips (drag-and-drop) ---
+  const reorderPins = useCallback(async (reorderedPinnedClips) => {
+    // Optimistic: apply new order immediately
+    const updates = reorderedPinnedClips.map((clip, index) => ({
+      ...clip,
+      pin_order: index,
+    }))
+
+    setClips((prev) => {
+      const unpinned = prev.filter((c) => !c.is_pinned)
+      return sortClips([...updates, ...unpinned])
+    })
+
+    // Persist to database
+    const promises = updates.map((clip, index) =>
+      supabase.from('clips').update({ pin_order: index }).eq('id', clip.id)
+    )
+
+    const results = await Promise.all(promises)
+    const failed = results.some((r) => r.error)
+
+    if (failed) {
+      toast('Failed to save order', 'error')
+      // Refresh to get correct state
+      refresh()
+    }
+  }, [refresh])
+
   return {
     clips,
     loading,
@@ -364,6 +398,7 @@ export function useClips(user) {
     togglePin,
     editClip,
     setExpiration,
+    reorderPins,
     refresh,
   }
 }

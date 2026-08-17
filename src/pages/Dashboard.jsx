@@ -6,6 +6,7 @@ import { useTheme } from '../hooks/useTheme'
 import PasteZone from '../components/clips/PasteZone'
 import MobilePasteBox from '../components/clips/MobilePasteBox'
 import ImageUpload from '../components/clips/ImageUpload'
+import SortableClipGrid from '../components/clips/SortableClipGrid'
 import ToastContainer from '../components/ui/Toast'
 import { toast } from '../components/ui/toastStore'
 import ConfirmModal from '../components/ui/ConfirmModal'
@@ -67,6 +68,7 @@ export default function Dashboard({ user }) {
     togglePin,
     editClip,
     setExpiration,
+    reorderPins,
   } = useClips(user)
 
   const { theme, toggleTheme } = useTheme()
@@ -445,8 +447,11 @@ export default function Dashboard({ user }) {
             <p>{query || filter !== 'all' ? 'Try another search or filter.' : 'Your next saved idea will appear here.'}</p>
           </div>
         ) : (
-          <section className="clip-grid">
-            {filteredClips.map((clip) => (
+          <SortableClipGrid
+            pinnedClips={filteredClips.filter((c) => c.is_pinned)}
+            unpinnedClips={filteredClips.filter((c) => !c.is_pinned)}
+            onReorder={reorderPins}
+            renderClip={(clip, isPinned, dragListeners) => (
               <article
                 className={`clip-card clip-${clip.type} ${selectedIds.has(clip.id) ? 'selected' : ''}`}
                 key={clip.id}
@@ -457,6 +462,9 @@ export default function Dashboard({ user }) {
                     <span className={`bulk-checkbox ${selectedIds.has(clip.id) ? 'checked' : ''}`}>
                       {selectedIds.has(clip.id) ? '✓' : ''}
                     </span>
+                  )}
+                  {isPinned && !bulkMode && (
+                    <button className="drag-handle" title="Drag to reorder" {...dragListeners}>⠿</button>
                   )}
                   <span className="type-pill">
                     <span className="type-symbol">{clip.type === 'image' ? '▧' : clip.type === 'link' ? '↗' : '≡'}</span>
@@ -512,8 +520,8 @@ export default function Dashboard({ user }) {
                   </div>
                 )}
               </article>
-            ))}
-          </section>
+            )}
+          />
         )}
 
         <footer className="vault-footer">
