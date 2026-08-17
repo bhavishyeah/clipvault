@@ -312,6 +312,29 @@ export function useClips(user) {
     }
   }, [])
 
+  // --- Edit clip content ---
+  const editClip = useCallback(async (clip, newContent) => {
+    const content = newContent.trim()
+    if (!content) return
+
+    const type = isUrl(content) ? 'link' : 'text'
+    const updated = { ...clip, content, type }
+    setClips((prev) => prev.map((c) => (c.id === clip.id ? updated : c)))
+
+    const { error } = await supabase
+      .from('clips')
+      .update({ content, type })
+      .eq('id', clip.id)
+
+    if (error) {
+      setClips((prev) => prev.map((c) => (c.id === clip.id ? clip : c)))
+      toast('Failed to edit clip', 'error')
+      console.error('Could not edit clip:', error.message)
+    } else {
+      toast('Clip updated')
+    }
+  }, [])
+
   // --- Set expiration on existing clip ---
   const setExpiration = useCallback(async (clip, expiresAt) => {
     const updated = { ...clip, expires_at: expiresAt }
@@ -339,6 +362,7 @@ export function useClips(user) {
     saveImage,
     removeClip,
     togglePin,
+    editClip,
     setExpiration,
     refresh,
   }

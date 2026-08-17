@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useClips } from '../hooks/useClips'
+import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
 import PasteZone from '../components/clips/PasteZone'
 import MobilePasteBox from '../components/clips/MobilePasteBox'
 import ImageUpload from '../components/clips/ImageUpload'
 import ToastContainer from '../components/ui/Toast'
 import { toast } from '../components/ui/toastStore'
 import ConfirmModal from '../components/ui/ConfirmModal'
+import EditModal from '../components/ui/EditModal'
 import './Dashboard.css'
 
 const formatDate = (value) =>
@@ -22,6 +24,17 @@ const getInitials = (email = '') => {
   return email.slice(0, 2).toUpperCase()
 }
 
+// Extract a favicon URL for link previews
+const getFaviconUrl = (url) => {
+  try {
+    const domain = url?.replace(/^https?:\/\//, '').split('/')[0]
+    if (!domain) return null
+    return `https://www.google.com/s2/favicons?domain=${domain}&sz=32`
+  } catch {
+    return null
+  }
+}
+
 export default function Dashboard({ user }) {
   const {
     clips,
@@ -32,16 +45,41 @@ export default function Dashboard({ user }) {
     saveImage,
     removeClip,
     togglePin,
+    editClip,
     setExpiration,
   } = useClips(user)
 
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState('all')
   const [confirmTarget, setConfirmTarget] = useState(null)
+  const [editTarget, setEditTarget] = useState(null)
   const [showUserMenu, setShowUserMenu] = useState(false)
   const searchTimer = useRef(null)
+  const searchInputRef = useRef(null)
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const shareHandled = useRef(false)
+
+  // --- Keyboard shortcuts ---
+  useKeyboardShortcuts({
+    searchRef: searchInputRef,
+    onEscape: () => {
+      setQuery('')
+      setDebouncedQuery('')
+      setShowUserMenu(false)
+      setConfirmTarget(null)
+      setEditTarget(null)
+    },
+  })
+
+  // --- Close dropdown on outside click ---
+  useEffect(() => {
+    if (!showUserMenu) return
+    const handleClick = (e) => {
+      if (!e.target.closest('.user-menu')) setShowUserMenu(false)
+    }
+    window.addEventListener('click', handleClick)
+    return () => window.removeEventListener('click', handleClick)
+  }, [showUserMenu])
 
   // --- Handle Android share target ---
   useEffect(() => {
@@ -55,13 +93,10 @@ export default function Dashboard({ user }) {
 
     const content = sharedUrl || sharedText || sharedTitle
     if (content) {
-      // Small delay to ensure hook is ready
       window.setTimeout(() => {
         saveText(content)
         toast('Shared content saved')
       }, 500)
-
-      // Clean URL without reloading
       window.history.replaceState({}, '', '/')
     }
   }, [saveText])
@@ -90,7 +125,7 @@ export default function Dashboard({ user }) {
     })
   }, [clips, filter, debouncedQuery])
 
-  // --- Clipboard actions with error handling ---
+  // --- Clipboard actions ---
 
   const copyClip = useCallback(async (clip) => {
     try {
@@ -145,7 +180,6 @@ export default function Dashboard({ user }) {
 
   // --- Delete with confirmation ---
   const handleDeleteClick = (clip) => setConfirmTarget(clip)
-
   const confirmDelete = () => {
     if (confirmTarget) {
       removeClip(confirmTarget)
@@ -153,7 +187,13 @@ export default function Dashboard({ user }) {
     }
   }
 
-  // --- Expiration helper ---
+  // --- Edit ---
+  const handleEditClick = (clip) => {
+    if (clip.type === 'image') return // Can't edit images
+    setEditTarget(clip)
+  }
+
+  // --- Expiration ---
   const handleSetExpiry = (clip, days) => {
     if (days === null) {
       setExpiration(clip, null)
@@ -164,7 +204,7 @@ export default function Dashboard({ user }) {
     }
   }
 
-  // --- Sign out all devices ---
+  // --- Auth ---
   const signOutAllDevices = async () => {
     const { error } = await supabase.auth.signOut({ scope: 'global' })
     if (error) {
@@ -206,7 +246,7 @@ export default function Dashboard({ user }) {
               <button
                 className="icon-button"
                 title="Account menu"
-                onClick={() => setShowUserMenu(!showUserMenu)}
+                onClick={(e) => { e.stopPropagation(); setShowUserMenu(!showUserMenu) }}
               >
                 ⋮
               </button>
@@ -287,9 +327,10 @@ export default function Dashboard({ user }) {
             <label className="search-box">
               <span>⌕</span>
               <input
+                ref={searchInputRef}
                 value={query}
                 onChange={handleSearchChange}
-                placeholder="Search your vault..."
+                placeholder="Search your vault… (Ctrl+K)"
               />
             </label>
             <div className="filter-tabs">
@@ -341,17 +382,32 @@ export default function Dashboard({ user }) {
                   <div className="image-preview-wrap">
                     <img src={clip.url} alt="Saved clip" className="image-preview" loading="lazy" />
                   </div>
+                ) : clip.type === 'link' ? (
+                  <div className="link-preview">
+                    <img
+                      src={getFaviconUrl(clip.content)}
+                      alt=""
+                      className="link-favicon"
+                      width="16"
+                      height="16"
+                      loading="lazy"
+                    />
+                    <div className="link-preview-text">
+                      <p className="clip-content">{clip.content}</p>
+                      <div className="link-domain">{clip.content?.replace(/^https?:\/\//, '').split('/')[0]}</div>
+                    </div>
+                  </div>
                 ) : (
-                  <>
-                    <p className="clip-content">{clip.content}</p>
-                    {clip.type === 'link' && <div className="link-domain">{clip.content?.replace(/^https?:\/\//, '').split('/')[0]}</div>}
-                  </>
+                  <p className="clip-content">{clip.content}</p>
                 )}
 
                 <div className="clip-card-bottom">
                   <time>{formatDate(clip.created_at)}</time>
                   <div className="clip-actions">
                     <button onClick={() => copyClip(clip)}>Copy</button>
+                    {clip.type !== 'image' && (
+                      <button onClick={() => handleEditClick(clip)}>Edit</button>
+                    )}
                     {clip.type === 'link' && <button onClick={() => openLink(clip.content)}>Open</button>}
                     {clip.type === 'image' && <button onClick={() => downloadClip(clip)}>Download</button>}
                     <button
@@ -382,6 +438,13 @@ export default function Dashboard({ user }) {
         message="This clip will be permanently removed. This cannot be undone."
         onConfirm={confirmDelete}
         onCancel={() => setConfirmTarget(null)}
+      />
+
+      <EditModal
+        open={!!editTarget}
+        clip={editTarget}
+        onSave={editClip}
+        onCancel={() => setEditTarget(null)}
       />
     </main>
   )
