@@ -227,6 +227,21 @@
   line-height: 1.05;
   letter-spacing: -1.5px;
   color: var(--text);
+  transition: all .3s ease;
+}
+
+.welcome-row h1:hover {
+  background: linear-gradient(90deg, #f43f5e, #a855f7, #3b82f6, #10b981, #f59e0b);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: gradient-shift 3s linear infinite;
+}
+
+@keyframes gradient-shift {
+  0% { background-position: 0% center; }
+  100% { background-position: 200% center; }
 }
 
 .welcome-row h1 span {
