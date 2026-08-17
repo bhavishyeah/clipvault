@@ -19,8 +19,6 @@ export default function App() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, newSession) => {
       setSession(newSession)
-
-      // Supabase fires PASSWORD_RECOVERY when user clicks the reset link
       if (event === 'PASSWORD_RECOVERY') {
         setShowResetForm(true)
       }
@@ -31,13 +29,13 @@ export default function App() {
 
   if (loading) {
     return (
-      <div style={{ display: 'grid', placeItems: 'center', minHeight: '100vh', color: '#9698ad' }}>
-        <p>Loading…</p>
+      <div className="app-loader">
+        <div className="app-loader-bar" />
+        <span className="app-loader-text">ClipVault</span>
       </div>
     )
   }
 
-  // Show password update form when user arrives from reset email
   if (showResetForm && session) {
     return <ResetPassword onDone={() => setShowResetForm(false)} />
   }

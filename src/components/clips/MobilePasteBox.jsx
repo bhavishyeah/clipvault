@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { toast } from '../ui/toastStore'
+import { IconCamera, IconClipboard } from '../ui/Icons'
 
 const ACCEPTED_TYPES = ['image/jpeg', 'image/jpg', 'image/png']
 const MAX_SIZE = 10 * 1024 * 1024 // 10MB
@@ -45,7 +46,7 @@ export default function MobilePasteBox({ onSave, onImage, saving }) {
           <span className="mobile-paste-label">MOBILE INPUT</span>
           <h3>Paste text or a link</h3>
         </div>
-        <span className="mobile-paste-icon">↳</span>
+        <span className="mobile-paste-icon"><IconClipboard width="16" height="16" /></span>
       </div>
 
       <textarea
@@ -68,7 +69,7 @@ export default function MobilePasteBox({ onSave, onImage, saving }) {
             disabled={saving}
             title="Upload image"
           >
-            📷
+            <IconCamera />
           </button>
           <button type="submit" disabled={!text.trim() || saving}>
             {saving ? 'Saving…' : 'Save text'}

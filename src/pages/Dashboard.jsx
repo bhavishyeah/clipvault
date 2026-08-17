@@ -11,6 +11,12 @@ import ToastContainer from '../components/ui/Toast'
 import { toast } from '../components/ui/toastStore'
 import ConfirmModal from '../components/ui/ConfirmModal'
 import EditModal from '../components/ui/EditModal'
+import {
+  IconVault, IconCopy, IconTrash, IconEdit, IconPin, IconPinFilled,
+  IconDownload, IconExternalLink, IconSearch, IconImage, IconText, IconLink,
+  IconSun, IconMoon, IconLogOut, IconMenu, IconGrip, IconClock,
+  IconInfinity, IconCheck, IconClipboard,
+} from '../components/ui/Icons'
 import './Dashboard.css'
 
 const formatDate = (value) =>
@@ -36,7 +42,6 @@ const getFaviconUrl = (url) => {
   }
 }
 
-// Calculate storage usage from clip metadata
 const calculateStorageUsage = (clips) => {
   let totalBytes = 0
   let imageCount = 0
@@ -58,17 +63,8 @@ const formatBytes = (bytes) => {
 
 export default function Dashboard({ user }) {
   const {
-    clips,
-    loading,
-    saving,
-    uploadProgress,
-    saveText,
-    saveImage,
-    removeClip,
-    togglePin,
-    editClip,
-    setExpiration,
-    reorderPins,
+    clips, loading, saving, uploadProgress,
+    saveText, saveImage, removeClip, togglePin, editClip, setExpiration, reorderPins,
   } = useClips(user)
 
   const { theme, toggleTheme } = useTheme()
@@ -86,116 +82,78 @@ export default function Dashboard({ user }) {
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const shareHandled = useRef(false)
 
-  // --- Keyboard shortcuts ---
   useKeyboardShortcuts({
     searchRef: searchInputRef,
     onEscape: () => {
-      setQuery('')
-      setDebouncedQuery('')
-      setShowUserMenu(false)
-      setConfirmTarget(null)
-      setEditTarget(null)
-      if (bulkMode) {
-        setBulkMode(false)
-        setSelectedIds(new Set())
-      }
+      setQuery(''); setDebouncedQuery(''); setShowUserMenu(false)
+      setConfirmTarget(null); setEditTarget(null)
+      if (bulkMode) { setBulkMode(false); setSelectedIds(new Set()) }
     },
   })
 
-  // --- Close dropdown on outside click ---
   useEffect(() => {
     if (!showUserMenu) return
-    const handleClick = (e) => {
-      if (!e.target.closest('.user-menu')) setShowUserMenu(false)
-    }
+    const handleClick = (e) => { if (!e.target.closest('.user-menu')) setShowUserMenu(false) }
     window.addEventListener('click', handleClick)
     return () => window.removeEventListener('click', handleClick)
   }, [showUserMenu])
 
-  // --- Handle Android share target ---
   useEffect(() => {
     if (shareHandled.current) return
     shareHandled.current = true
-
     const params = new URLSearchParams(window.location.search)
-    const sharedText = params.get('text')
-    const sharedUrl = params.get('url')
-    const sharedTitle = params.get('title')
-
-    const content = sharedUrl || sharedText || sharedTitle
+    const content = params.get('url') || params.get('text') || params.get('title')
     if (content) {
-      window.setTimeout(() => {
-        saveText(content)
-        toast('Shared content saved')
-      }, 500)
+      window.setTimeout(() => { saveText(content); toast('Shared content saved') }, 500)
       window.history.replaceState({}, '', '/')
     }
   }, [saveText])
 
-  // Debounced search
   const handleSearchChange = (e) => {
     const value = e.target.value
     setQuery(value)
     window.clearTimeout(searchTimer.current)
-    searchTimer.current = window.setTimeout(() => {
-      setDebouncedQuery(value)
-    }, 200)
+    searchTimer.current = window.setTimeout(() => setDebouncedQuery(value), 200)
   }
 
   const filteredClips = useMemo(() => {
-    const normalizedQuery = debouncedQuery.trim().toLowerCase()
+    const q = debouncedQuery.trim().toLowerCase()
     return clips.filter((clip) => {
       const matchesType = filter === 'all' || clip.type === filter
-      const matchesQuery =
-        !normalizedQuery ||
-        clip.content?.toLowerCase().includes(normalizedQuery) ||
-        clip.metadata?.mime?.toLowerCase().includes(normalizedQuery)
+      const matchesQuery = !q || clip.content?.toLowerCase().includes(q) || clip.metadata?.mime?.toLowerCase().includes(q)
       return matchesType && matchesQuery
     })
   }, [clips, filter, debouncedQuery])
 
   const storageUsage = useMemo(() => calculateStorageUsage(clips), [clips])
 
-  // --- Clipboard actions ---
   const copyClip = useCallback(async (clip) => {
     try {
       if (clip.type === 'image' && clip.url) {
-        if (!navigator.clipboard?.write) {
-          toast('Image copy not supported in this browser', 'error')
-          return
-        }
-        const response = await fetch(clip.url)
-        const blob = await response.blob()
+        if (!navigator.clipboard?.write) { toast('Image copy not supported', 'error'); return }
+        const r = await fetch(clip.url)
+        const blob = await r.blob()
         await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })])
         toast('Image copied')
         return
       }
       await navigator.clipboard.writeText(clip.content ?? '')
       toast('Copied to clipboard')
-    } catch (err) {
-      toast('Failed to copy — try clicking inside the page first', 'error')
-      console.error('Clipboard error:', err)
-    }
+    } catch { toast('Failed to copy', 'error') }
   }, [])
 
   const downloadClip = useCallback(async (clip) => {
     if (!clip.url) return
     try {
-      const response = await fetch(clip.url)
-      const blob = await response.blob()
-      const objectUrl = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = objectUrl
-      link.download = clip.file_path?.split('/').pop() || `clipvault-${Date.now()}.${clip.metadata?.format || 'png'}`
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      URL.revokeObjectURL(objectUrl)
+      const r = await fetch(clip.url)
+      const blob = await r.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = clip.file_path?.split('/').pop() || `clipvault-${Date.now()}.${clip.metadata?.format || 'png'}`
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url)
       toast('Download started')
-    } catch (err) {
-      toast('Download failed', 'error')
-      console.error('Download error:', err)
-    }
+    } catch { toast('Download failed', 'error') }
   }, [])
 
   const openLink = useCallback((content) => {
@@ -203,135 +161,69 @@ export default function Dashboard({ user }) {
     window.open(url, '_blank', 'noopener,noreferrer')
   }, [])
 
-  // --- Delete ---
   const handleDeleteClick = (clip) => setConfirmTarget(clip)
-  const confirmDelete = () => {
-    if (confirmTarget) { removeClip(confirmTarget); setConfirmTarget(null) }
-  }
+  const confirmDelete = () => { if (confirmTarget) { removeClip(confirmTarget); setConfirmTarget(null) } }
+  const handleEditClick = (clip) => { if (clip.type !== 'image') setEditTarget(clip) }
 
-  // --- Edit ---
-  const handleEditClick = (clip) => {
-    if (clip.type === 'image') return
-    setEditTarget(clip)
-  }
-
-  // --- Expiration ---
   const handleSetExpiry = (clip, days) => {
     if (days === null) { setExpiration(clip, null) }
-    else {
-      const date = new Date()
-      date.setDate(date.getDate() + days)
-      setExpiration(clip, date.toISOString())
-    }
+    else { const d = new Date(); d.setDate(d.getDate() + days); setExpiration(clip, d.toISOString()) }
   }
 
-  // --- Bulk actions ---
-  const toggleSelect = (id) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-
-  const selectAll = () => {
-    setSelectedIds(new Set(filteredClips.map((c) => c.id)))
-  }
-
-  const bulkDelete = () => {
-    selectedIds.forEach((id) => {
-      const clip = clips.find((c) => c.id === id)
-      if (clip) removeClip(clip)
-    })
-    setSelectedIds(new Set())
-    setBulkMode(false)
-    setBulkConfirm(false)
-  }
+  const toggleSelect = (id) => setSelectedIds((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  const selectAll = () => setSelectedIds(new Set(filteredClips.map((c) => c.id)))
+  const bulkDelete = () => { selectedIds.forEach((id) => { const c = clips.find((x) => x.id === id); if (c) removeClip(c) }); setSelectedIds(new Set()); setBulkMode(false); setBulkConfirm(false) }
 
   const exportVault = () => {
-    const exportData = clips.map((clip) => ({
-      type: clip.type,
-      content: clip.content || null,
-      url: clip.url || null,
-      is_pinned: clip.is_pinned,
-      created_at: clip.created_at,
-      expires_at: clip.expires_at,
-      metadata: clip.metadata,
-    }))
-
-    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
+    const data = clips.map((c) => ({ type: c.type, content: c.content || null, url: c.url || null, is_pinned: c.is_pinned, created_at: c.created_at, metadata: c.metadata }))
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `clipvault-export-${new Date().toISOString().slice(0, 10)}.json`
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    URL.revokeObjectURL(url)
+    const a = document.createElement('a'); a.href = url; a.download = `clipvault-export-${new Date().toISOString().slice(0, 10)}.json`
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url)
     toast('Vault exported')
   }
 
-  // --- Auth ---
-  const signOutAllDevices = async () => {
-    const { error } = await supabase.auth.signOut({ scope: 'global' })
-    if (error) toast('Failed to sign out from all devices', 'error')
-    else toast('Signed out from all devices')
-    setShowUserMenu(false)
-  }
+  const signOutAll = async () => { await supabase.auth.signOut({ scope: 'global' }); setShowUserMenu(false) }
+  const signOut = async () => { await supabase.auth.signOut(); setShowUserMenu(false) }
 
-  const signOut = async () => {
-    await supabase.auth.signOut()
-    setShowUserMenu(false)
+  const getTypeIcon = (type) => {
+    if (type === 'image') return <IconImage />
+    if (type === 'link') return <IconLink />
+    return <IconText />
   }
 
   return (
     <main className="vault-shell">
-      <div className="ambient ambient-one" />
-      <div className="ambient ambient-two" />
-
       <div className="vault-container">
         <header className="topbar">
           <div className="brand-lockup">
-            <div className="brand-mark">✦</div>
+            <div className="brand-mark"><IconVault /></div>
             <div>
               <div className="brand-name">ClipVault</div>
-              <div className="brand-caption">Your private digital memory</div>
+              <div className="brand-caption">Private clipboard</div>
             </div>
           </div>
 
           <div className="topbar-actions">
-            <button
-              className="theme-toggle"
-              onClick={toggleTheme}
-              title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
-            >
-              {theme === 'dark' ? '☀' : '◗'}
+            <button className="theme-toggle" onClick={toggleTheme} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
+              {theme === 'dark' ? <IconSun /> : <IconMoon />}
             </button>
-            <div className="sync-status">
-              <span className="status-dot" />
-              Synced
-            </div>
+            <div className="sync-status"><span className="status-dot" />Synced</div>
             <div className="user-menu">
               <div className="avatar">{getInitials(user.email)}</div>
               <span className="user-email">{user.email}</span>
-              <button
-                className="icon-button"
-                title="Account menu"
-                onClick={(e) => { e.stopPropagation(); setShowUserMenu(!showUserMenu) }}
-              >
-                ⋮
+              <button className="icon-button" title="Menu" onClick={(e) => { e.stopPropagation(); setShowUserMenu(!showUserMenu) }}>
+                <IconMenu />
               </button>
-
               {showUserMenu && (
                 <div className="user-dropdown">
                   <div className="dropdown-storage">
-                    <span>Storage: {formatBytes(storageUsage.totalBytes)}</span>
+                    <span>{formatBytes(storageUsage.totalBytes)}</span>
                     <span>{storageUsage.imageCount} images</span>
                   </div>
-                  <button onClick={exportVault}>Export vault (JSON)</button>
-                  <button onClick={signOut}>Sign out</button>
-                  <button onClick={signOutAllDevices}>Sign out all devices</button>
+                  <button onClick={exportVault}>Export vault</button>
+                  <button onClick={signOut}><IconLogOut style={{ marginRight: 8, verticalAlign: 'middle' }} />Sign out</button>
+                  <button onClick={signOutAll}>Sign out all devices</button>
                 </div>
               )}
             </div>
@@ -340,111 +232,78 @@ export default function Dashboard({ user }) {
 
         <section className="welcome-row">
           <div>
-            <p className="eyebrow">YOUR PERSONAL VAULT</p>
-            <h1>Everything you copy, <span>within reach.</span></h1>
-            <p className="welcome-copy">
-              Save text, links and screenshots. Find them anywhere, whenever
-              you need them.
-            </p>
+            <p className="eyebrow">Your vault</p>
+            <h1>Everything you copy,<br /><span>within reach.</span></h1>
+            <p className="welcome-copy">Save text, links and images. Access them from any device, anytime.</p>
           </div>
           <div className="clip-count">
             <strong>{clips.length}</strong>
-            <span>saved clips</span>
+            <span>clips</span>
           </div>
         </section>
 
         <section className="capture-card">
-          <div className="capture-glow" />
           <div className="capture-content">
-            <div className="capture-icon">⌘</div>
+            <div className="capture-icon"><IconClipboard /></div>
             <div>
-              <h2>Capture something new</h2>
-              <p>Copy anything, then paste it anywhere on this page.</p>
+              <h2>Capture something</h2>
+              <p>Paste anywhere on this page to save instantly.</p>
               <div className="capture-hints">
-                <div className="desktop-hint">
-                  <strong>Laptop:</strong> copy text, then press <kbd>Ctrl</kbd> + <kbd>V</kbd>
-                </div>
-                <div className="mobile-hint">
-                  <strong>Mobile:</strong> use the paste box below to save text and links
-                </div>
+                <div className="desktop-hint"><strong>Desktop:</strong> Ctrl + V anywhere</div>
+                <div className="mobile-hint"><strong>Mobile:</strong> Use the input below</div>
               </div>
             </div>
           </div>
-
-          <div className="shortcut-hint">
-            <kbd>Ctrl</kbd><span>+</span><kbd>V</kbd>
-          </div>
-
-          {saving && (
-            <div className="saving-label">
-              {uploadProgress > 0 ? `Uploading… ${uploadProgress}%` : 'Saving…'}
-            </div>
-          )}
-
+          <div className="shortcut-hint"><kbd>Ctrl</kbd><span>+</span><kbd>V</kbd></div>
+          {saving && <div className="saving-label">{uploadProgress > 0 ? `Uploading ${uploadProgress}%` : 'Saving...'}</div>}
           <MobilePasteBox onSave={saveText} onImage={saveImage} saving={saving} />
           <PasteZone onText={saveText} onImage={saveImage} />
         </section>
 
         {saving && uploadProgress > 0 && (
-          <div className="upload-progress-bar">
-            <div className="upload-progress-fill" style={{ width: `${uploadProgress}%` }} />
-          </div>
+          <div className="upload-progress-bar"><div className="upload-progress-fill" style={{ width: `${uploadProgress}%` }} /></div>
         )}
 
         <ImageUpload onImage={saveImage} saving={saving} />
 
         <section className="toolbar">
           <div className="section-title">
-            <h2>Your clips</h2>
-            <span>{filteredClips.length} items</span>
+            <h2>Clips</h2>
+            <span>{filteredClips.length}</span>
           </div>
           <div className="toolbar-controls">
             <label className="search-box">
-              <span>⌕</span>
-              <input
-                ref={searchInputRef}
-                value={query}
-                onChange={handleSearchChange}
-                placeholder="Search your vault… (Ctrl+K)"
-              />
+              <IconSearch />
+              <input ref={searchInputRef} value={query} onChange={handleSearchChange} placeholder="Search... (Ctrl+K)" />
             </label>
             <div className="filter-tabs">
               {['all', 'text', 'link', 'image'].map((type) => (
-                <button
-                  key={type}
-                  className={filter === type ? 'active' : ''}
-                  onClick={() => setFilter(type)}
-                >
+                <button key={type} className={filter === type ? 'active' : ''} onClick={() => setFilter(type)}>
                   {type === 'all' ? 'All' : type}
                 </button>
               ))}
             </div>
-            <button
-              className={`bulk-toggle ${bulkMode ? 'active' : ''}`}
-              onClick={() => { setBulkMode(!bulkMode); setSelectedIds(new Set()) }}
-              title="Bulk select"
-            >
-              ☐
+            <button className={`bulk-toggle ${bulkMode ? 'active' : ''}`} onClick={() => { setBulkMode(!bulkMode); setSelectedIds(new Set()) }} title="Select multiple">
+              <IconCheck />
             </button>
           </div>
         </section>
 
-        {/* Bulk action bar */}
         {bulkMode && selectedIds.size > 0 && (
           <div className="bulk-bar">
             <span>{selectedIds.size} selected</span>
             <button onClick={selectAll}>Select all</button>
-            <button className="bulk-delete" onClick={() => setBulkConfirm(true)}>Delete selected</button>
+            <button className="bulk-delete" onClick={() => setBulkConfirm(true)}>Delete</button>
           </div>
         )}
 
         {loading ? (
-          <div className="empty-state"><div className="loader" />Loading your vault…</div>
+          <div className="empty-state"><div className="loader" />Loading...</div>
         ) : filteredClips.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-icon">◌</div>
-            <h3>{query || filter !== 'all' ? 'No matching clips' : 'Your vault is empty'}</h3>
-            <p>{query || filter !== 'all' ? 'Try another search or filter.' : 'Your next saved idea will appear here.'}</p>
+            <div className="empty-icon"><IconClipboard width="28" height="28" /></div>
+            <h3>{query || filter !== 'all' ? 'No matching clips' : 'Empty vault'}</h3>
+            <p>{query || filter !== 'all' ? 'Try a different search.' : 'Your first clip will appear here.'}</p>
           </div>
         ) : (
           <SortableClipGrid
@@ -452,42 +311,21 @@ export default function Dashboard({ user }) {
             unpinnedClips={filteredClips.filter((c) => !c.is_pinned)}
             onReorder={reorderPins}
             renderClip={(clip, isPinned, dragListeners) => (
-              <article
-                className={`clip-card clip-${clip.type} ${selectedIds.has(clip.id) ? 'selected' : ''}`}
-                key={clip.id}
-                onClick={bulkMode ? () => toggleSelect(clip.id) : undefined}
-              >
+              <article className={`clip-card clip-${clip.type} ${selectedIds.has(clip.id) ? 'selected' : ''}`} key={clip.id} onClick={bulkMode ? () => toggleSelect(clip.id) : undefined}>
                 <div className="clip-card-top">
-                  {bulkMode && (
-                    <span className={`bulk-checkbox ${selectedIds.has(clip.id) ? 'checked' : ''}`}>
-                      {selectedIds.has(clip.id) ? '✓' : ''}
-                    </span>
-                  )}
-                  {isPinned && !bulkMode && (
-                    <button className="drag-handle" title="Drag to reorder" {...dragListeners}>⠿</button>
-                  )}
-                  <span className="type-pill">
-                    <span className="type-symbol">{clip.type === 'image' ? '▧' : clip.type === 'link' ? '↗' : '≡'}</span>
-                    {clip.type}
-                  </span>
+                  {bulkMode && <span className={`bulk-checkbox ${selectedIds.has(clip.id) ? 'checked' : ''}`}>{selectedIds.has(clip.id) && <IconCheck />}</span>}
+                  {isPinned && !bulkMode && <button className="drag-handle" title="Drag to reorder" {...dragListeners}><IconGrip /></button>}
+                  <span className="type-pill"><span className="type-symbol">{getTypeIcon(clip.type)}</span>{clip.type}</span>
                   <div className="clip-card-top-actions">
-                    {clip.expires_at && (
-                      <span className="expiry-badge" title={`Expires ${formatDate(clip.expires_at)}`}>⏱</span>
-                    )}
-                    <button
-                      className={`pin-button ${clip.is_pinned ? 'pinned' : ''}`}
-                      title={clip.is_pinned ? 'Unpin clip' : 'Pin clip'}
-                      onClick={(e) => { e.stopPropagation(); togglePin(clip) }}
-                    >
-                      {clip.is_pinned ? '★' : '☆'}
+                    {clip.expires_at && <span className="expiry-badge" title={`Expires ${formatDate(clip.expires_at)}`}><IconClock /></span>}
+                    <button className={`pin-button ${clip.is_pinned ? 'pinned' : ''}`} title={clip.is_pinned ? 'Unpin' : 'Pin'} onClick={(e) => { e.stopPropagation(); togglePin(clip) }}>
+                      {clip.is_pinned ? <IconPinFilled /> : <IconPin />}
                     </button>
                   </div>
                 </div>
 
                 {clip.type === 'image' ? (
-                  <div className="image-preview-wrap">
-                    <img src={clip.url} alt="Saved clip" className="image-preview" loading="lazy" />
-                  </div>
+                  <div className="image-preview-wrap"><img src={clip.url} alt="Clip" className="image-preview" loading="lazy" /></div>
                 ) : clip.type === 'link' ? (
                   <div className="link-preview">
                     <img src={getFaviconUrl(clip.content)} alt="" className="link-favicon" width="16" height="16" loading="lazy" />
@@ -504,18 +342,14 @@ export default function Dashboard({ user }) {
                   <div className="clip-card-bottom">
                     <time>{formatDate(clip.created_at)}</time>
                     <div className="clip-actions">
-                      <button onClick={() => copyClip(clip)}>Copy</button>
-                      {clip.type !== 'image' && <button onClick={() => handleEditClick(clip)}>Edit</button>}
-                      {clip.type === 'link' && <button onClick={() => openLink(clip.content)}>Open</button>}
-                      {clip.type === 'image' && <button onClick={() => downloadClip(clip)}>Download</button>}
-                      <button
-                        className="expiry-action"
-                        onClick={() => handleSetExpiry(clip, clip.expires_at ? null : 7)}
-                        title={clip.expires_at ? 'Remove expiry' : 'Expire in 7 days'}
-                      >
-                        {clip.expires_at ? '∞' : '⏱'}
+                      <button onClick={() => copyClip(clip)} title="Copy"><IconCopy /></button>
+                      {clip.type !== 'image' && <button onClick={() => handleEditClick(clip)} title="Edit"><IconEdit /></button>}
+                      {clip.type === 'link' && <button onClick={() => openLink(clip.content)} title="Open"><IconExternalLink /></button>}
+                      {clip.type === 'image' && <button onClick={() => downloadClip(clip)} title="Download"><IconDownload /></button>}
+                      <button className="expiry-action" onClick={() => handleSetExpiry(clip, clip.expires_at ? null : 7)} title={clip.expires_at ? 'Remove expiry' : 'Expire in 7d'}>
+                        {clip.expires_at ? <IconInfinity /> : <IconClock />}
                       </button>
-                      <button className="delete-action" onClick={() => handleDeleteClick(clip)}>Delete</button>
+                      <button className="delete-action" onClick={() => handleDeleteClick(clip)} title="Delete"><IconTrash /></button>
                     </div>
                   </div>
                 )}
@@ -525,34 +359,14 @@ export default function Dashboard({ user }) {
         )}
 
         <footer className="vault-footer">
-          <span>Private by design</span><span>•</span><span>Stored securely in your vault</span>
+          <span>Private by design</span>
         </footer>
       </div>
 
       <ToastContainer />
-
-      <ConfirmModal
-        open={!!confirmTarget}
-        title="Delete clip?"
-        message="This clip will be permanently removed. This cannot be undone."
-        onConfirm={confirmDelete}
-        onCancel={() => setConfirmTarget(null)}
-      />
-
-      <ConfirmModal
-        open={bulkConfirm}
-        title={`Delete ${selectedIds.size} clips?`}
-        message="All selected clips will be permanently removed. This cannot be undone."
-        onConfirm={bulkDelete}
-        onCancel={() => setBulkConfirm(false)}
-      />
-
-      <EditModal
-        open={!!editTarget}
-        clip={editTarget}
-        onSave={editClip}
-        onCancel={() => setEditTarget(null)}
-      />
+      <ConfirmModal open={!!confirmTarget} title="Delete this clip?" message="This action cannot be undone." onConfirm={confirmDelete} onCancel={() => setConfirmTarget(null)} />
+      <ConfirmModal open={bulkConfirm} title={`Delete ${selectedIds.size} clips?`} message="All selected clips will be permanently removed." onConfirm={bulkDelete} onCancel={() => setBulkConfirm(false)} />
+      <EditModal open={!!editTarget} clip={editTarget} onSave={editClip} onCancel={() => setEditTarget(null)} />
     </main>
   )
 }

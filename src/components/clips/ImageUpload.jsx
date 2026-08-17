@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { toast } from '../ui/toastStore'
+import { IconUpload } from '../ui/Icons'
 
 const ACCEPTED_TYPES = ['image/jpeg', 'image/jpg', 'image/png']
 const MAX_SIZE = 10 * 1024 * 1024 // 10MB
@@ -68,7 +69,7 @@ export default function ImageUpload({ onImage, saving }) {
       />
 
       <div className="image-upload-content">
-        <span className="image-upload-icon">▧</span>
+        <span className="image-upload-icon"><IconUpload /></span>
         <div>
           <p className="image-upload-label">
             {saving ? 'Uploading…' : 'Upload image'}
