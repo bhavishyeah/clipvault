@@ -11,7 +11,6 @@ import ToastContainer from '../components/ui/Toast'
 import { toast } from '../components/ui/toastStore'
 import ConfirmModal from '../components/ui/ConfirmModal'
 import EditModal from '../components/ui/EditModal'
-import QRScanner from '../components/auth/QRScanner'
 import {
   IconVault, IconCopy, IconTrash, IconEdit, IconPin, IconPinFilled,
   IconDownload, IconExternalLink, IconSearch, IconImage, IconText, IconLink,
@@ -153,7 +152,6 @@ export default function Dashboard({ user }) {
   const [selectedIds, setSelectedIds] = useState(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
   const [undoClip, setUndoClip] = useState(null)
-  const [showScanner, setShowScanner] = useState(false)
   const undoTimer = useRef(null)
   const searchTimer = useRef(null)
   const searchInputRef = useRef(null)
@@ -353,7 +351,6 @@ export default function Dashboard({ user }) {
                     <span>{storageUsage.imageCount} images</span>
                   </div>
                   <button onClick={exportVault}>Export vault</button>
-                  <button onClick={() => { setShowScanner(true); setShowUserMenu(false) }}>Link desktop</button>
                   <button onClick={signOut}><IconLogOut style={{ marginRight: 8, verticalAlign: 'middle' }} />Sign out</button>
                   <button onClick={signOutAll}>Sign out all devices</button>
                 </div>
@@ -500,7 +497,6 @@ export default function Dashboard({ user }) {
       <ToastContainer />
       <ConfirmModal open={bulkConfirm} title={`Delete ${selectedIds.size} clips?`} message="All selected clips will be permanently removed." onConfirm={bulkDelete} onCancel={() => setBulkConfirm(false)} />
       <EditModal open={!!editTarget} clip={editTarget} onSave={editClip} onCancel={() => setEditTarget(null)} />
-      {showScanner && <QRScanner onClose={() => setShowScanner(false)} />}
     </main>
   )
 }

@@ -452,3 +452,20 @@ a {
   .auth-form-section h1 { text-align: center; }
   .auth-form-section .auth-subtitle { text-align: center; }
 }
+
+/* ==========================================================================
+   QR Confirm Page
+   ========================================================================== */
+
+.qr-confirm-loader {
+  display: flex;
+  justify-content: center;
+  margin-top: 20px;
+}
+
+.qr-confirm-success {
+  display: flex;
+  justify-content: center;
+  margin-top: 20px;
+  color: var(--success);
+}
