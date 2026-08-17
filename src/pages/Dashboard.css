@@ -1373,3 +1373,91 @@ kbd {
     font-size: 10px;
   }
 }
+
+/* ==========================================================================
+   Upload Progress Bar
+   ========================================================================== */
+
+.upload-progress-bar {
+  width: 100%;
+  height: 4px;
+  margin-bottom: 16px;
+  border-radius: 4px;
+  background: #ffffff10;
+  overflow: hidden;
+}
+
+.upload-progress-fill {
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #7567ff, #a36bff);
+  transition: width .2s ease-out;
+  box-shadow: 0 0 10px #7567ff88;
+}
+
+/* ==========================================================================
+   User Dropdown Menu
+   ========================================================================== */
+
+.user-menu {
+  position: relative;
+}
+
+.user-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  padding: 6px;
+  border: 1px solid #ffffff16;
+  border-radius: 12px;
+  background: #16171fee;
+  backdrop-filter: blur(16px);
+  box-shadow: 0 12px 40px #00000066;
+  animation: scale-in .15s ease-out;
+}
+
+.user-dropdown button {
+  width: 100%;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 8px;
+  color: #c8c7d7;
+  background: transparent;
+  font: 13px 'Archivo', sans-serif;
+  text-align: left;
+  transition: background .15s;
+}
+
+.user-dropdown button:hover {
+  color: #fff;
+  background: #ffffff0d;
+}
+
+/* ==========================================================================
+   Expiry Badge & Action
+   ========================================================================== */
+
+.clip-card-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.expiry-badge {
+  color: #ffaa44;
+  font-size: 14px;
+}
+
+.clip-actions .expiry-action {
+  color: #a0a0c0;
+  background: transparent;
+}
+
+.clip-actions .expiry-action:hover {
+  color: #ffaa44;
+  background: #ffaa4418;
+}

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useClips } from '../hooks/useClips'
 import PasteZone from '../components/clips/PasteZone'
@@ -27,17 +27,44 @@ export default function Dashboard({ user }) {
     clips,
     loading,
     saving,
+    uploadProgress,
     saveText,
     saveImage,
     removeClip,
     togglePin,
+    setExpiration,
   } = useClips(user)
 
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState('all')
   const [confirmTarget, setConfirmTarget] = useState(null)
+  const [showUserMenu, setShowUserMenu] = useState(false)
   const searchTimer = useRef(null)
   const [debouncedQuery, setDebouncedQuery] = useState('')
+  const shareHandled = useRef(false)
+
+  // --- Handle Android share target ---
+  useEffect(() => {
+    if (shareHandled.current) return
+    shareHandled.current = true
+
+    const params = new URLSearchParams(window.location.search)
+    const sharedText = params.get('text')
+    const sharedUrl = params.get('url')
+    const sharedTitle = params.get('title')
+
+    const content = sharedUrl || sharedText || sharedTitle
+    if (content) {
+      // Small delay to ensure hook is ready
+      window.setTimeout(() => {
+        saveText(content)
+        toast('Shared content saved')
+      }, 500)
+
+      // Clean URL without reloading
+      window.history.replaceState({}, '', '/')
+    }
+  }, [saveText])
 
   // Debounced search for performance
   const handleSearchChange = (e) => {
@@ -117,7 +144,6 @@ export default function Dashboard({ user }) {
   }, [])
 
   // --- Delete with confirmation ---
-
   const handleDeleteClick = (clip) => setConfirmTarget(clip)
 
   const confirmDelete = () => {
@@ -125,6 +151,33 @@ export default function Dashboard({ user }) {
       removeClip(confirmTarget)
       setConfirmTarget(null)
     }
+  }
+
+  // --- Expiration helper ---
+  const handleSetExpiry = (clip, days) => {
+    if (days === null) {
+      setExpiration(clip, null)
+    } else {
+      const date = new Date()
+      date.setDate(date.getDate() + days)
+      setExpiration(clip, date.toISOString())
+    }
+  }
+
+  // --- Sign out all devices ---
+  const signOutAllDevices = async () => {
+    const { error } = await supabase.auth.signOut({ scope: 'global' })
+    if (error) {
+      toast('Failed to sign out from all devices', 'error')
+    } else {
+      toast('Signed out from all devices')
+    }
+    setShowUserMenu(false)
+  }
+
+  const signOut = async () => {
+    await supabase.auth.signOut()
+    setShowUserMenu(false)
   }
 
   return (
@@ -152,11 +205,18 @@ export default function Dashboard({ user }) {
               <span className="user-email">{user.email}</span>
               <button
                 className="icon-button"
-                title="Sign out"
-                onClick={() => supabase.auth.signOut()}
+                title="Account menu"
+                onClick={() => setShowUserMenu(!showUserMenu)}
               >
-                ↗
+                ⋮
               </button>
+
+              {showUserMenu && (
+                <div className="user-dropdown">
+                  <button onClick={signOut}>Sign out</button>
+                  <button onClick={signOutAllDevices}>Sign out all devices</button>
+                </div>
+              )}
             </div>
           </div>
         </header>
@@ -198,11 +258,22 @@ export default function Dashboard({ user }) {
             <kbd>Ctrl</kbd><span>+</span><kbd>V</kbd>
           </div>
 
-          {saving && <div className="saving-label">Saving…</div>}
+          {saving && (
+            <div className="saving-label">
+              {uploadProgress > 0 ? `Uploading… ${uploadProgress}%` : 'Saving…'}
+            </div>
+          )}
 
           <MobilePasteBox onSave={saveText} onImage={saveImage} saving={saving} />
           <PasteZone onText={saveText} onImage={saveImage} />
         </section>
+
+        {/* Upload progress bar */}
+        {saving && uploadProgress > 0 && (
+          <div className="upload-progress-bar">
+            <div className="upload-progress-fill" style={{ width: `${uploadProgress}%` }} />
+          </div>
+        )}
 
         {/* Desktop image upload zone */}
         <ImageUpload onImage={saveImage} saving={saving} />
@@ -252,13 +323,18 @@ export default function Dashboard({ user }) {
                     <span className="type-symbol">{clip.type === 'image' ? '▧' : clip.type === 'link' ? '↗' : '≡'}</span>
                     {clip.type}
                   </span>
-                  <button
-                    className={`pin-button ${clip.is_pinned ? 'pinned' : ''}`}
-                    title={clip.is_pinned ? 'Unpin clip' : 'Pin clip'}
-                    onClick={() => togglePin(clip)}
-                  >
-                    {clip.is_pinned ? '★' : '☆'}
-                  </button>
+                  <div className="clip-card-top-actions">
+                    {clip.expires_at && (
+                      <span className="expiry-badge" title={`Expires ${formatDate(clip.expires_at)}`}>⏱</span>
+                    )}
+                    <button
+                      className={`pin-button ${clip.is_pinned ? 'pinned' : ''}`}
+                      title={clip.is_pinned ? 'Unpin clip' : 'Pin clip'}
+                      onClick={() => togglePin(clip)}
+                    >
+                      {clip.is_pinned ? '★' : '☆'}
+                    </button>
+                  </div>
                 </div>
 
                 {clip.type === 'image' ? (
@@ -275,10 +351,16 @@ export default function Dashboard({ user }) {
                 <div className="clip-card-bottom">
                   <time>{formatDate(clip.created_at)}</time>
                   <div className="clip-actions">
-                    {clip.type !== 'image' && <button onClick={() => copyClip(clip)}>Copy</button>}
-                    {clip.type === 'image' && <button onClick={() => copyClip(clip)}>Copy</button>}
+                    <button onClick={() => copyClip(clip)}>Copy</button>
                     {clip.type === 'link' && <button onClick={() => openLink(clip.content)}>Open</button>}
                     {clip.type === 'image' && <button onClick={() => downloadClip(clip)}>Download</button>}
+                    <button
+                      className="expiry-action"
+                      onClick={() => handleSetExpiry(clip, clip.expires_at ? null : 7)}
+                      title={clip.expires_at ? 'Remove expiry' : 'Expire in 7 days'}
+                    >
+                      {clip.expires_at ? '∞' : '⏱'}
+                    </button>
                     <button className="delete-action" onClick={() => handleDeleteClick(clip)}>Delete</button>
                   </div>
                 </div>

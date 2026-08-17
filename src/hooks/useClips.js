@@ -37,9 +37,10 @@ export function useClips(user) {
   const [clips, setClips] = useState([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0) // 0-100
   const channelRef = useRef(null)
 
-  // --- Full refresh (used for manual refresh only) ---
+  // --- Full refresh ---
   const refresh = useCallback(async () => {
     if (!user) return
 
@@ -59,16 +60,20 @@ export function useClips(user) {
     setLoading(false)
   }, [user])
 
-  // --- Setup: initial load + Realtime subscription ---
+  // --- Setup: initial load + Realtime + expiration cleanup ---
   useEffect(() => {
     if (!user) return
 
     let cancelled = false
 
     const loadInitial = async () => {
+      // Delete expired clips first (server-side via RLS, but also client filter)
+      const now = new Date().toISOString()
+
       const { data, error } = await supabase
         .from('clips')
         .select('*')
+        .or(`expires_at.is.null,expires_at.gt.${now}`)
         .order('is_pinned', { ascending: false })
         .order('created_at', { ascending: false })
 
@@ -83,6 +88,17 @@ export function useClips(user) {
       setLoading(false)
     }
 
+    // Clean up expired clips in background
+    const cleanExpired = async () => {
+      const now = new Date().toISOString()
+      await supabase
+        .from('clips')
+        .delete()
+        .lt('expires_at', now)
+        .not('expires_at', 'is', null)
+    }
+
+    cleanExpired()
     loadInitial()
 
     const channel = supabase
@@ -141,7 +157,7 @@ export function useClips(user) {
   }, [user])
 
   // --- Save text (optimistic) ---
-  const saveText = useCallback(async (rawText) => {
+  const saveText = useCallback(async (rawText, options = {}) => {
     const content = rawText.trim()
     if (!content || !user) return
 
@@ -155,16 +171,20 @@ export function useClips(user) {
       content,
       metadata: {},
       is_pinned: false,
+      expires_at: options.expiresAt || null,
       created_at: new Date().toISOString(),
     }
 
     setClips((prev) => sortClips([optimistic, ...prev]))
 
-    const { error } = await supabase.from('clips').insert({
+    const insertData = {
       user_id: user.id,
       type,
       content,
-    })
+    }
+    if (options.expiresAt) insertData.expires_at = options.expiresAt
+
+    const { error } = await supabase.from('clips').insert(insertData)
 
     if (error) {
       setClips((prev) => prev.filter((c) => c.id !== optimistic.id))
@@ -177,8 +197,8 @@ export function useClips(user) {
     setSaving(false)
   }, [user])
 
-  // --- Save image ---
-  const saveImage = useCallback(async (blob) => {
+  // --- Save image with progress ---
+  const saveImage = useCallback(async (blob, options = {}) => {
     if (!user) return
 
     if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) {
@@ -187,6 +207,7 @@ export function useClips(user) {
     }
 
     setSaving(true)
+    setUploadProgress(0)
 
     try {
       const formData = new FormData()
@@ -194,18 +215,34 @@ export function useClips(user) {
       formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET)
       formData.append('folder', `clipvault/${user.id}`)
 
-      const response = await fetch(
-        `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`,
-        { method: 'POST', body: formData }
-      )
+      // Upload with XHR for progress tracking
+      const uploaded = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
 
-      const uploaded = await response.json()
+        xhr.upload.addEventListener('progress', (e) => {
+          if (e.lengthComputable) {
+            const pct = Math.round((e.loaded / e.total) * 100)
+            setUploadProgress(pct)
+          }
+        })
 
-      if (!response.ok) {
-        throw new Error(uploaded.error?.message || 'Cloudinary upload failed')
-      }
+        xhr.addEventListener('load', () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(JSON.parse(xhr.responseText))
+          } else {
+            const err = JSON.parse(xhr.responseText)
+            reject(new Error(err.error?.message || 'Upload failed'))
+          }
+        })
 
-      const { error } = await supabase.from('clips').insert({
+        xhr.addEventListener('error', () => reject(new Error('Network error')))
+        xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')))
+
+        xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`)
+        xhr.send(formData)
+      })
+
+      const insertData = {
         user_id: user.id,
         type: 'image',
         metadata: {
@@ -219,7 +256,10 @@ export function useClips(user) {
           height: uploaded.height,
           mime: blob.type,
         },
-      })
+      }
+      if (options.expiresAt) insertData.expires_at = options.expiresAt
+
+      const { error } = await supabase.from('clips').insert(insertData)
 
       if (error) throw new Error(error.message)
 
@@ -229,6 +269,7 @@ export function useClips(user) {
       console.error('Could not save image:', err.message)
     } finally {
       setSaving(false)
+      setUploadProgress(0)
     }
   }, [user])
 
@@ -271,14 +312,34 @@ export function useClips(user) {
     }
   }, [])
 
+  // --- Set expiration on existing clip ---
+  const setExpiration = useCallback(async (clip, expiresAt) => {
+    const updated = { ...clip, expires_at: expiresAt }
+    setClips((prev) => prev.map((c) => (c.id === clip.id ? updated : c)))
+
+    const { error } = await supabase
+      .from('clips')
+      .update({ expires_at: expiresAt })
+      .eq('id', clip.id)
+
+    if (error) {
+      setClips((prev) => prev.map((c) => (c.id === clip.id ? clip : c)))
+      toast('Failed to set expiration', 'error')
+    } else {
+      toast(expiresAt ? 'Expiration set' : 'Expiration removed')
+    }
+  }, [])
+
   return {
     clips,
     loading,
     saving,
+    uploadProgress,
     saveText,
     saveImage,
     removeClip,
     togglePin,
+    setExpiration,
     refresh,
   }
 }
