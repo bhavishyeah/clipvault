@@ -120,7 +120,17 @@ export function useClips(user) {
         async (payload) => {
           const enriched = await resolveUrl(payload.new)
           setClips((prev) => {
+            // Check for exact ID match (already exists)
             if (prev.some((c) => c.id === enriched.id)) return prev
+            // Replace optimistic temp entry with the real one (match by content + type)
+            const tempIndex = prev.findIndex(
+              (c) => c.id.startsWith('temp-') && c.content === enriched.content && c.type === enriched.type
+            )
+            if (tempIndex !== -1) {
+              const updated = [...prev]
+              updated[tempIndex] = enriched
+              return sortClips(updated)
+            }
             return sortClips([enriched, ...prev])
           })
         }
