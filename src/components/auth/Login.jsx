@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { supabase } from '../../lib/supabaseClient'
 import { IconVault } from '../ui/Icons'
+import QRLogin from './QRLogin'
 
 export default function Login() {
-  const [mode, setMode] = useState('login')
+  const [mode, setMode] = useState('login') // 'login' | 'signup' | 'reset'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -50,48 +51,63 @@ export default function Login() {
 
   return (
     <main className="auth-page">
-      <section className="auth-card">
-        <div className="auth-logo"><IconVault width="24" height="24" /></div>
-        <h1>{isReset ? 'Reset password' : isSignup ? 'Create account' : 'Sign in'}</h1>
-        <p className="auth-subtitle">
-          {isReset ? 'We\'ll send you a reset link' : isSignup ? 'Start your private clipboard vault' : 'Access your clipboard vault'}
-        </p>
+      <section className="auth-card auth-card-wide">
+        <div className="auth-grid">
+          {/* Left: QR Code */}
+          <div className="auth-qr-section">
+            <QRLogin />
+          </div>
 
-        <form onSubmit={handleSubmit}>
-          <label htmlFor="email">Email</label>
-          <input id="email" type="email" required autoComplete="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+          {/* Divider */}
+          <div className="auth-vertical-divider">
+            <span>or</span>
+          </div>
 
-          {!isReset && (
-            <>
-              <label htmlFor="password">Password</label>
-              <input id="password" type="password" required autoComplete={isSignup ? 'new-password' : 'current-password'} placeholder="8+ characters" value={password} onChange={(e) => setPassword(e.target.value)} />
-            </>
-          )}
+          {/* Right: Form */}
+          <div className="auth-form-section">
+            <div className="auth-logo"><IconVault width="24" height="24" /></div>
+            <h1>{isReset ? 'Reset password' : isSignup ? 'Create account' : 'Sign in'}</h1>
+            <p className="auth-subtitle">
+              {isReset ? "We'll send you a reset link" : isSignup ? 'Start your private clipboard vault' : 'Use email and password'}
+            </p>
 
-          {isSignup && (
-            <>
-              <label htmlFor="confirm-password">Confirm password</label>
-              <input id="confirm-password" type="password" required autoComplete="new-password" placeholder="Repeat password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
-            </>
-          )}
+            <form onSubmit={handleSubmit}>
+              <label htmlFor="email">Email</label>
+              <input id="email" type="email" required autoComplete="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} />
 
-          <button type="submit" className="auth-primary" disabled={busy}>
-            {busy ? 'Please wait...' : isReset ? 'Send link' : isSignup ? 'Create account' : 'Sign in'}
-          </button>
-        </form>
+              {!isReset && (
+                <>
+                  <label htmlFor="password">Password</label>
+                  <input id="password" type="password" required autoComplete={isSignup ? 'new-password' : 'current-password'} placeholder="8+ characters" value={password} onChange={(e) => setPassword(e.target.value)} />
+                </>
+              )}
 
-        {message && <p className="auth-message">{message}</p>}
-        {error && <p className="auth-error">{error}</p>}
+              {isSignup && (
+                <>
+                  <label htmlFor="confirm-password">Confirm password</label>
+                  <input id="confirm-password" type="password" required autoComplete="new-password" placeholder="Repeat password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
+                </>
+              )}
 
-        {mode === 'login' && (
-          <button type="button" className="auth-link" onClick={() => switchMode('reset')}>Forgot password?</button>
-        )}
+              <button type="submit" className="auth-primary" disabled={busy}>
+                {busy ? 'Please wait...' : isReset ? 'Send link' : isSignup ? 'Create account' : 'Sign in'}
+              </button>
+            </form>
 
-        <div className="auth-divider" />
+            {message && <p className="auth-message">{message}</p>}
+            {error && <p className="auth-error">{error}</p>}
 
-        <button type="button" className="auth-secondary" onClick={() => switchMode(isReset ? 'login' : isSignup ? 'login' : 'signup')}>
-          {isReset ? 'Back to sign in' : isSignup ? 'Already have an account?' : 'Create an account'}
-        </button>
+            {mode === 'login' && (
+              <button type="button" className="auth-link" onClick={() => switchMode('reset')}>Forgot password?</button>
+            )}
+
+            <div className="auth-divider" />
+
+            <button type="button" className="auth-secondary" onClick={() => switchMode(isReset ? 'login' : isSignup ? 'login' : 'signup')}>
+              {isReset ? 'Back to sign in' : isSignup ? 'Already have an account?' : 'Create an account'}
+            </button>
+          </div>
+        </div>
       </section>
     </main>
   )
