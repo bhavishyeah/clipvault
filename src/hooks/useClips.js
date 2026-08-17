@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { toast } from '../components/ui/toastStore'
+import { trackEvent } from '../lib/analytics'
+import { checkRateLimit } from '../lib/rateLimit'
 
 const SUPABASE_BUCKET = 'clips'
 const CLOUDINARY_CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
@@ -177,6 +179,11 @@ export function useClips(user) {
     const content = rawText.trim()
     if (!content || !user) return
 
+    if (!checkRateLimit('save', 5, 10000)) {
+      toast('Slow down — too many saves at once', 'error')
+      return
+    }
+
     setSaving(true)
 
     const type = isUrl(content) ? 'link' : 'text'
@@ -208,6 +215,7 @@ export function useClips(user) {
       console.error('Could not save text:', error.message)
     } else {
       toast(`${type === 'link' ? 'Link' : 'Text'} saved`)
+      trackEvent(type === 'link' ? 'save_link' : 'save_text')
     }
 
     setSaving(false)
@@ -219,6 +227,11 @@ export function useClips(user) {
 
     if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) {
       toast('Image upload not configured', 'error')
+      return
+    }
+
+    if (!checkRateLimit('save', 5, 10000)) {
+      toast('Slow down — too many saves at once', 'error')
       return
     }
 
@@ -280,6 +293,7 @@ export function useClips(user) {
       if (error) throw new Error(error.message)
 
       toast('Image saved')
+      trackEvent('save_image')
     } catch (err) {
       toast('Failed to upload image', 'error')
       console.error('Could not save image:', err.message)
@@ -309,6 +323,7 @@ export function useClips(user) {
     // TODO: Delete Cloudinary asset server-side (requires secure backend endpoint)
 
     toast('Clip deleted')
+    trackEvent('delete')
   }, [])
 
   // --- Toggle pin (optimistic) ---
@@ -348,6 +363,7 @@ export function useClips(user) {
       console.error('Could not edit clip:', error.message)
     } else {
       toast('Clip updated')
+      trackEvent('edit')
     }
   }, [])
 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from './lib/supabaseClient'
+import { trackEvent } from './lib/analytics'
 import Login from './components/auth/Login.jsx'
 import Dashboard from './pages/Dashboard.jsx'
 import ResetPassword from './components/auth/ResetPassword.jsx'
@@ -10,6 +11,8 @@ export default function App() {
   const [showResetForm, setShowResetForm] = useState(false)
 
   useEffect(() => {
+    trackEvent('session_start')
+
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session)
       setLoading(false)

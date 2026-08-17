@@ -17,6 +17,7 @@ import {
   IconSun, IconMoon, IconLogOut, IconMenu, IconGrip, IconClock,
   IconInfinity, IconCheck, IconClipboard,
 } from '../components/ui/Icons'
+import { trackEvent } from '../lib/analytics'
 import './Dashboard.css'
 
 const formatDate = (value) =>
@@ -188,7 +189,7 @@ export default function Dashboard({ user }) {
     const value = e.target.value
     setQuery(value)
     window.clearTimeout(searchTimer.current)
-    searchTimer.current = window.setTimeout(() => setDebouncedQuery(value), 200)
+    searchTimer.current = window.setTimeout(() => { setDebouncedQuery(value); if (value.trim()) trackEvent('search') }, 200)
   }
 
   const filteredClips = useMemo(() => {
@@ -230,6 +231,7 @@ export default function Dashboard({ user }) {
       }
       await navigator.clipboard.writeText(clip.content ?? '')
       toast('Copied to clipboard')
+      trackEvent('copy')
     } catch { toast('Failed to copy', 'error') }
   }, [])
 
