@@ -262,6 +262,14 @@
   display: block;
 }
 
+/* Capture row — side by side */
+.capture-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
 /* Capture card */
 .capture-card {
   position: relative;
@@ -269,7 +277,6 @@
   border: 1px solid var(--border);
   border-radius: 16px;
   background: var(--surface);
-  margin-bottom: 24px;
 }
 
 .capture-content {
@@ -473,10 +480,9 @@ kbd {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 24px;
   padding: 20px;
   border: 1px dashed var(--border);
-  border-radius: var(--radius);
+  border-radius: 16px;
   background: transparent;
   cursor: pointer;
   transition: all .15s;
@@ -1147,6 +1153,10 @@ kbd {
   .clip-count { display: none; }
 
   .capture-card { padding: 16px; }
+
+  .capture-row {
+    grid-template-columns: 1fr;
+  }
 
   .shortcut-hint { display: none; }
 

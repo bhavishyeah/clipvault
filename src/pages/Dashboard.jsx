@@ -242,29 +242,31 @@ export default function Dashboard({ user }) {
           </div>
         </section>
 
-        <section className="capture-card">
-          <div className="capture-content">
-            <div className="capture-icon"><IconClipboard /></div>
-            <div>
-              <h2>Capture something</h2>
-              <p>Paste anywhere on this page to save instantly.</p>
-              <div className="capture-hints">
-                <div className="desktop-hint"><strong>Desktop:</strong> Ctrl + V anywhere</div>
-                <div className="mobile-hint"><strong>Mobile:</strong> Use the input below</div>
+        <section className="capture-row">
+          <div className="capture-card">
+            <div className="capture-content">
+              <div className="capture-icon"><IconClipboard /></div>
+              <div>
+                <h2>Capture something</h2>
+                <p>Paste anywhere on this page to save instantly.</p>
+                <div className="capture-hints">
+                  <div className="desktop-hint"><strong>Desktop:</strong> Ctrl + V anywhere</div>
+                  <div className="mobile-hint"><strong>Mobile:</strong> Use the input below</div>
+                </div>
               </div>
             </div>
+            <div className="shortcut-hint"><kbd>Ctrl</kbd><span>+</span><kbd>V</kbd></div>
+            {saving && <div className="saving-label">{uploadProgress > 0 ? `Uploading ${uploadProgress}%` : 'Saving...'}</div>}
+            <MobilePasteBox onSave={saveText} onImage={saveImage} saving={saving} />
+            <PasteZone onText={saveText} onImage={saveImage} />
           </div>
-          <div className="shortcut-hint"><kbd>Ctrl</kbd><span>+</span><kbd>V</kbd></div>
-          {saving && <div className="saving-label">{uploadProgress > 0 ? `Uploading ${uploadProgress}%` : 'Saving...'}</div>}
-          <MobilePasteBox onSave={saveText} onImage={saveImage} saving={saving} />
-          <PasteZone onText={saveText} onImage={saveImage} />
+
+          <ImageUpload onImage={saveImage} saving={saving} />
         </section>
 
         {saving && uploadProgress > 0 && (
           <div className="upload-progress-bar"><div className="upload-progress-fill" style={{ width: `${uploadProgress}%` }} /></div>
         )}
-
-        <ImageUpload onImage={saveImage} saving={saving} />
 
         <section className="toolbar">
           <div className="section-title">
