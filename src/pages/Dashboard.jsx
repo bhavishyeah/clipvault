@@ -84,6 +84,7 @@ function DesktopPasteInput({ onSave, saving }) {
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={handleKeyDown}
+        onPaste={(e) => e.stopPropagation()}
         placeholder="Paste or type text, links..."
         rows={3}
         maxLength={10000}
