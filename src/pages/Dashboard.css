@@ -246,7 +246,7 @@
 }
 
 .welcome-row h1 span {
-  color: var(--text-muted);
+  -webkit-text-fill-color: transparent;
 }
 
 .welcome-copy {
