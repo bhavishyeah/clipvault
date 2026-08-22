@@ -359,73 +359,8 @@ a {
 }
 
 /* ==========================================================================
-   QR Scanner (Mobile in-app camera)
+   QR Confirm Page
    ========================================================================== */
-
-.qr-scanner-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 10000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-  background: rgba(0,0,0,.8);
-  animation: fade-in .15s;
-}
-
-.qr-scanner-modal {
-  width: 100%;
-  max-width: 340px;
-  padding: 20px;
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  background: var(--surface);
-}
-
-.qr-scanner-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-}
-
-.qr-scanner-header h3 {
-  font-family: var(--font-heading);
-  font-size: 16px;
-  font-weight: 500;
-  color: var(--text);
-}
-
-.qr-scanner-close {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-muted);
-}
-
-.qr-scanner-view {
-  width: 100%;
-  min-height: 260px;
-  border-radius: var(--radius);
-  overflow: hidden;
-  background: #000;
-}
-
-.qr-scanner-status {
-  margin-top: 12px;
-  text-align: center;
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-
-/* Responsive: stack QR and form on mobile */
 @media (max-width: 700px) {
   .auth-card-wide {
     max-width: 100%;

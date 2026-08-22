@@ -1100,8 +1100,6 @@
 
   .clip-count-inline { display: none; }
 
-  .capture-card { padding: 16px; }
-
   .desktop-paste-box { display: none; }
 
   .mobile-paste-box { display: block; margin-bottom: 16px; }
@@ -1148,7 +1146,6 @@
   }
 
   .welcome-row h1 { font-size: 26px; }
-  .capture-card { padding: 12px; }
 }
 
 /* ==========================================================================
@@ -1332,15 +1329,6 @@
   color: var(--bg);
   font-size: 14px;
   font-weight: 500;
-}
-
-/* ==========================================================================
-   Duplicate warning in desktop input
-   ========================================================================== */
-
-.desktop-input-hint {
-  font-size: 11px;
-  color: var(--text-muted);
 }
 
 /* ==========================================================================
