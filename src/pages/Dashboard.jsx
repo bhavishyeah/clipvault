@@ -3,6 +3,8 @@ import { supabase } from '../lib/supabaseClient'
 import { useClips } from '../hooks/useClips'
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
 import { useTheme } from '../hooks/useTheme'
+import { usePresence } from '../hooks/usePresence'
+import { useDirectSend } from '../hooks/useDirectSend'
 import PasteZone from '../components/clips/PasteZone'
 import MobilePasteBox from '../components/clips/MobilePasteBox'
 import ImageUpload from '../components/clips/ImageUpload'
@@ -11,6 +13,8 @@ import ToastContainer from '../components/ui/Toast'
 import { toast } from '../components/ui/toastStore'
 import ConfirmModal from '../components/ui/ConfirmModal'
 import EditModal from '../components/ui/EditModal'
+import SendComposer from '../components/send/SendComposer'
+import IncomingTransfers from '../components/send/IncomingTransfers'
 import {
   IconVault, IconCopy, IconTrash, IconEdit, IconPin, IconPinFilled,
   IconDownload, IconExternalLink, IconSearch, IconImage, IconText, IconLink,
@@ -144,6 +148,13 @@ export default function Dashboard({ user, profile }) {
   } = useClips(user)
 
   const { theme, toggleTheme } = useTheme()
+
+  // Track online/offline presence
+  usePresence(user)
+
+  // Direct Send
+  const { incoming, sending: directSending, searchUsers, sendTo, saveToVault, dismissTransfer } = useDirectSend(user)
+  const [showSendComposer, setShowSendComposer] = useState(false)
 
   const isAnonymous = user.user_metadata?.is_anonymous === true
   const [showConvert, setShowConvert] = useState(false)
@@ -469,6 +480,16 @@ export default function Dashboard({ user, profile }) {
         <PasteZone onText={saveText} onImage={saveImage} />
         <MobilePasteBox onSave={saveText} onImage={saveImage} saving={saving} />
 
+        {/* Send To button */}
+        {!isAnonymous && (
+          <button className="send-to-button" onClick={() => setShowSendComposer(true)}>
+            Send to @user
+          </button>
+        )}
+
+        {/* Incoming transfers */}
+        <IncomingTransfers transfers={incoming} onSaveToVault={saveToVault} onDismiss={dismissTransfer} />
+
         {saving && uploadProgress > 0 && (
           <div className="upload-progress-bar"><div className="upload-progress-fill" style={{ width: `${uploadProgress}%` }} /></div>
         )}
@@ -614,10 +635,21 @@ export default function Dashboard({ user, profile }) {
       <ConfirmModal
         open={showDeleteConfirm}
         title="Delete your account?"
-        message="Your account and username will be deleted. Your saved clips will remain in the database."
+        message="Your account and username will be deleted."
         onConfirm={deleteAccount}
         onCancel={() => setShowDeleteConfirm(false)}
       />
+
+      {/* Send Composer */}
+      {showSendComposer && (
+        <SendComposer
+          onClose={() => setShowSendComposer(false)}
+          searchUsers={searchUsers}
+          sendTo={sendTo}
+          sending={directSending}
+          userId={user.id}
+        />
+      )}
     </main>
   )
 }
