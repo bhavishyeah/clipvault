@@ -12,28 +12,36 @@ export function useDirectSend(user) {
     if (!user) return
 
     const loadData = async () => {
-      // Load contacts with profile + presence info
+      // Load contacts
       const { data: contactData } = await supabase
         .from('contacts')
-        .select('contact_id, profiles:contact_id(id, username, display_name)')
+        .select('contact_id')
         .eq('user_id', user.id)
 
-      if (contactData) {
-        // Fetch presence for contacts
+      if (contactData && contactData.length > 0) {
         const ids = contactData.map((c) => c.contact_id)
-        const { data: presenceData } = ids.length > 0
-          ? await supabase.from('presence').select('user_id, status, device').in('user_id', ids)
-          : { data: [] }
+
+        // Fetch profiles for contacts
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('id, username, display_name')
+          .in('id', ids)
+
+        // Fetch presence for contacts
+        const { data: presenceData } = await supabase
+          .from('presence')
+          .select('user_id, status, device')
+          .in('user_id', ids)
 
         const presenceMap = {}
         presenceData?.forEach((p) => { presenceMap[p.user_id] = p })
 
-        setContacts(contactData.map((c) => ({
-          id: c.contact_id,
-          username: c.profiles?.username,
-          display_name: c.profiles?.display_name,
-          presence: presenceMap[c.contact_id] || { status: 'offline', device: 'unknown' },
-        })).filter((c) => c.username)) // Filter out any broken entries
+        setContacts((profileData || []).map((p) => ({
+          id: p.id,
+          username: p.username,
+          display_name: p.display_name,
+          presence: presenceMap[p.id] || { status: 'offline', device: 'unknown' },
+        })).filter((c) => c.username))
       }
 
       // Load pending incoming transfers

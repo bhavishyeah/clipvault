@@ -229,7 +229,7 @@
 .welcome-row h1 {
   font-family: 'Array', sans-serif;
   font-size: clamp(32px, 5vw, 52px);
-  font-weight: 400;
+  font-weight: 700;
   line-height: 1.05;
   letter-spacing: -1.5px;
   color: transparent;
