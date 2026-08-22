@@ -153,7 +153,7 @@ export default function Dashboard({ user, profile }) {
   usePresence(user)
 
   // Direct Send
-  const { incoming, sending: directSending, searchUsers, sendTo, saveToVault, dismissTransfer } = useDirectSend(user)
+  const { incoming, contacts, sending: directSending, searchUsers, sendTo, addContact, removeContact, saveToVault, dismissTransfer } = useDirectSend(user)
   const [showSendComposer, setShowSendComposer] = useState(false)
 
   const isAnonymous = user.user_metadata?.is_anonymous === true
@@ -648,6 +648,9 @@ export default function Dashboard({ user, profile }) {
           sendTo={sendTo}
           sending={directSending}
           userId={user.id}
+          contacts={contacts}
+          addContact={addContact}
+          removeContact={removeContact}
         />
       )}
     </main>

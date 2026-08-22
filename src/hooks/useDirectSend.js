@@ -4,26 +4,63 @@ import { toast } from '../components/ui/toastStore'
 
 export function useDirectSend(user) {
   const [incoming, setIncoming] = useState([])
+  const [contacts, setContacts] = useState([])
   const [sending, setSending] = useState(false)
 
-  // Load pending incoming transfers
+  // Load contacts + incoming transfers on mount
   useEffect(() => {
     if (!user) return
 
-    const loadIncoming = async () => {
-      const { data } = await supabase
+    const loadData = async () => {
+      // Load contacts with profile + presence info
+      const { data: contactData } = await supabase
+        .from('contacts')
+        .select('contact_id, profiles:contact_id(id, username, display_name)')
+        .eq('user_id', user.id)
+
+      if (contactData) {
+        // Fetch presence for contacts
+        const ids = contactData.map((c) => c.contact_id)
+        const { data: presenceData } = ids.length > 0
+          ? await supabase.from('presence').select('user_id, status, device').in('user_id', ids)
+          : { data: [] }
+
+        const presenceMap = {}
+        presenceData?.forEach((p) => { presenceMap[p.user_id] = p })
+
+        setContacts(contactData.map((c) => ({
+          id: c.contact_id,
+          username: c.profiles?.username,
+          display_name: c.profiles?.display_name,
+          presence: presenceMap[c.contact_id] || { status: 'offline', device: 'unknown' },
+        })).filter((c) => c.username)) // Filter out any broken entries
+      }
+
+      // Load pending incoming transfers
+      const { data: transferData } = await supabase
         .from('direct_transfers')
-        .select('*, sender:profiles!direct_transfers_sender_id_fkey(username, display_name)')
+        .select('*')
         .eq('recipient_id', user.id)
         .eq('status', 'pending')
         .order('created_at', { ascending: false })
 
-      if (data) setIncoming(data)
+      if (transferData) {
+        // Enrich with sender info
+        const senderIds = [...new Set(transferData.map((t) => t.sender_id))]
+        const { data: senderProfiles } = senderIds.length > 0
+          ? await supabase.from('profiles').select('id, username, display_name').in('id', senderIds)
+          : { data: [] }
+
+        const senderMap = {}
+        senderProfiles?.forEach((p) => { senderMap[p.id] = p })
+
+        setIncoming(transferData.map((t) => ({ ...t, sender: senderMap[t.sender_id] || null })))
+      }
     }
 
-    loadIncoming()
+    loadData()
 
-    // Subscribe to new incoming transfers
+    // Subscribe to new incoming transfers (realtime)
     const channel = supabase
       .channel('direct-transfers')
       .on(
@@ -35,7 +72,6 @@ export function useDirectSend(user) {
           filter: `recipient_id=eq.${user.id}`,
         },
         async (payload) => {
-          // Fetch sender info
           const { data: sender } = await supabase
             .from('profiles')
             .select('username, display_name')
@@ -62,12 +98,12 @@ export function useDirectSend(user) {
       .from('profiles')
       .select('id, username, display_name')
       .ilike('username', `%${normalized}%`)
-      .neq('id', user?.id) // Don't show self
+      .neq('id', user?.id)
       .limit(5)
 
     if (!data) return []
 
-    // Fetch presence for each result
+    // Fetch presence
     const userIds = data.map((u) => u.id)
     const { data: presenceData } = await supabase
       .from('presence')
@@ -80,7 +116,37 @@ export function useDirectSend(user) {
     return data.map((u) => ({
       ...u,
       presence: presenceMap[u.id] || { status: 'offline', device: 'unknown' },
+      isContact: contacts.some((c) => c.id === u.id),
     }))
+  }, [user, contacts])
+
+  // Add contact
+  const addContact = useCallback(async (contactUser) => {
+    const { error } = await supabase.from('contacts').insert({
+      user_id: user.id,
+      contact_id: contactUser.id,
+    })
+
+    if (error) {
+      if (error.message.includes('duplicate')) toast('Already in contacts', 'info')
+      else toast('Failed to add contact', 'error')
+      return
+    }
+
+    setContacts((prev) => [...prev, {
+      id: contactUser.id,
+      username: contactUser.username,
+      display_name: contactUser.display_name,
+      presence: contactUser.presence || { status: 'offline', device: 'unknown' },
+    }])
+    toast(`@${contactUser.username} added to contacts`)
+  }, [user])
+
+  // Remove contact
+  const removeContact = useCallback(async (contactId) => {
+    await supabase.from('contacts').delete().eq('user_id', user.id).eq('contact_id', contactId)
+    setContacts((prev) => prev.filter((c) => c.id !== contactId))
+    toast('Contact removed')
   }, [user])
 
   // Send content to a user
@@ -90,7 +156,7 @@ export function useDirectSend(user) {
     setSending(true)
 
     try {
-      const insertData = {
+      const { error } = await supabase.from('direct_transfers').insert({
         sender_id: user.id,
         recipient_id: recipientId,
         type,
@@ -100,9 +166,7 @@ export function useDirectSend(user) {
         file_size: fileData?.size || null,
         mime_type: fileData?.mime || null,
         status: 'pending',
-      }
-
-      const { error } = await supabase.from('direct_transfers').insert(insertData)
+      })
 
       if (error) throw new Error(error.message)
 
@@ -144,7 +208,7 @@ export function useDirectSend(user) {
     }
   }, [user, markDelivered])
 
-  // Dismiss (mark delivered without saving)
+  // Dismiss transfer
   const dismissTransfer = useCallback(async (transfer) => {
     await markDelivered(transfer.id)
     toast('Dismissed')
@@ -152,9 +216,12 @@ export function useDirectSend(user) {
 
   return {
     incoming,
+    contacts,
     sending,
     searchUsers,
     sendTo,
+    addContact,
+    removeContact,
     saveToVault,
     dismissTransfer,
   }

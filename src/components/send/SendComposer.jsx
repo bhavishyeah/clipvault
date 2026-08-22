@@ -7,9 +7,9 @@ const CLOUDINARY_UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
 
 const isUrl = (text) => /^(https?:\/\/)?[\w.-]+\.[a-z]{2,}([/?#].*)?$/i.test(text)
 
-export default function SendComposer({ onClose, searchUsers, sendTo, sending, userId }) {
+export default function SendComposer({ onClose, searchUsers, sendTo, sending, userId, contacts, addContact, removeContact }) {
   const [content, setContent] = useState('')
-  const [image, setImage] = useState(null) // { file, preview }
+  const [image, setImage] = useState(null)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
   const [selectedUser, setSelectedUser] = useState(null)
@@ -40,6 +40,12 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
     e.target.value = ''
   }
 
+  const selectUser = (u) => {
+    setSelectedUser(u)
+    setQuery(`@${u.username}`)
+    setResults([])
+  }
+
   const handleSend = async () => {
     if (!selectedUser) { toast('Select a recipient', 'error'); return }
     if (!content.trim() && !image) { toast('Add content to send', 'error'); return }
@@ -50,7 +56,6 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
 
     if (image) {
       type = 'image'
-      // Upload to Cloudinary
       if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) {
         toast('Image upload not configured', 'error')
         return
@@ -66,14 +71,9 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
         { method: 'POST', body: formData }
       )
       const uploaded = await res.json()
-      if (!res.ok) { toast('Image upload failed', 'error'); return }
+      if (!res.ok) { toast('Upload failed', 'error'); return }
 
-      fileData = {
-        url: uploaded.secure_url,
-        name: image.file.name,
-        size: uploaded.bytes,
-        mime: image.file.type,
-      }
+      fileData = { url: uploaded.secure_url, name: image.file.name, size: uploaded.bytes, mime: image.file.type }
       finalContent = null
     } else if (isUrl(finalContent)) {
       type = 'link'
@@ -82,6 +82,8 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
     const success = await sendTo(selectedUser.id, type, finalContent, fileData)
     if (success) onClose()
   }
+
+  const isContact = (id) => contacts?.some((c) => c.id === id)
 
   return (
     <div className="confirm-overlay" onClick={onClose}>
@@ -120,6 +122,21 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
           <input ref={fileRef} type="file" accept=".jpg,.jpeg,.png" onChange={handleImagePick} hidden />
         </div>
 
+        {/* Contacts (quick pick) */}
+        {contacts && contacts.length > 0 && !selectedUser && !query && (
+          <div className="send-contacts">
+            <span className="send-contacts-label">Contacts</span>
+            <div className="send-contacts-list">
+              {contacts.map((c) => (
+                <button key={c.id} className="send-contact-chip" onClick={() => selectUser(c)}>
+                  <span className="send-status-dot" data-status={c.presence?.status} />
+                  @{c.username}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Recipient search */}
         <div className="send-recipient">
           <div className="send-search-box">
@@ -131,21 +148,25 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
             />
           </div>
 
-          {/* Selected user */}
           {selectedUser && (
             <div className="send-selected">
               <span className="send-status-dot" data-status={selectedUser.presence?.status} />
               <strong>{selectedUser.display_name}</strong>
               <span>@{selectedUser.username}</span>
-              <span className="send-device">{selectedUser.presence?.device || 'offline'}</span>
+              <span className="send-device">{selectedUser.presence?.status === 'online' ? selectedUser.presence.device : 'offline'}</span>
+              {!isContact(selectedUser.id) && (
+                <button className="send-add-contact" onClick={() => addContact(selectedUser)}>+ Save</button>
+              )}
+              {isContact(selectedUser.id) && (
+                <button className="send-remove-contact" onClick={() => removeContact(selectedUser.id)}>Remove</button>
+              )}
             </div>
           )}
 
-          {/* Search results */}
           {!selectedUser && results.length > 0 && (
             <div className="send-results">
               {results.map((u) => (
-                <button key={u.id} className="send-result-item" onClick={() => { setSelectedUser(u); setQuery(`@${u.username}`); setResults([]) }}>
+                <button key={u.id} className="send-result-item" onClick={() => selectUser(u)}>
                   <span className="send-status-dot" data-status={u.presence?.status} />
                   <div>
                     <strong>{u.display_name}</strong>
@@ -160,7 +181,6 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
           {searching && <p className="send-searching">Searching...</p>}
         </div>
 
-        {/* Send button */}
         <button
           className="send-button"
           onClick={handleSend}
