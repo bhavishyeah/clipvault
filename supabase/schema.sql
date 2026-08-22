@@ -1,4 +1,4 @@
--- ClipVault — Supabase schema
+-- VOLT — Supabase schema
 -- Run in: Supabase Dashboard → SQL Editor → New query → paste → Run
 
 create table if not exists public.clips (

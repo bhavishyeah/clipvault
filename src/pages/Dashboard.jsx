@@ -28,9 +28,11 @@ const formatDate = (value) =>
     minute: '2-digit',
   }).format(new Date(value))
 
-const getInitials = (email = '') => {
-  if (!email) return '?'
-  return email.slice(0, 2).toUpperCase()
+const getInitials = (name = '') => {
+  if (!name) return '?'
+  const parts = name.trim().split(' ')
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
+  return name.slice(0, 2).toUpperCase()
 }
 
 const getFaviconUrl = (url) => {
@@ -135,7 +137,7 @@ function DesktopPasteInput({ onSave, saving, clips }) {
   )
 }
 
-export default function Dashboard({ user }) {
+export default function Dashboard({ user, profile }) {
   const {
     clips, loading, saving, uploadProgress,
     saveText, saveImage, removeClip, togglePin, editClip, setExpiration, reorderPins,
@@ -250,7 +252,7 @@ export default function Dashboard({ user }) {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = clip.file_path?.split('/').pop() || `clipvault-${Date.now()}.${clip.metadata?.format || 'png'}`
+      a.download = clip.file_path?.split('/').pop() || `volt-${Date.now()}.${clip.metadata?.format || 'png'}`
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url)
       toast('Download started')
     } catch { toast('Download failed', 'error') }
@@ -303,7 +305,7 @@ export default function Dashboard({ user }) {
     const data = clips.map((c) => ({ type: c.type, content: c.content || null, url: c.url || null, is_pinned: c.is_pinned, created_at: c.created_at, metadata: c.metadata }))
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url; a.download = `clipvault-export-${new Date().toISOString().slice(0, 10)}.json`
+    const a = document.createElement('a'); a.href = url; a.download = `volt-export-${new Date().toISOString().slice(0, 10)}.json`
     document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url)
     toast('Vault exported')
   }
@@ -383,7 +385,7 @@ export default function Dashboard({ user }) {
           <div className="brand-lockup">
             <div className="brand-mark"><IconVault /></div>
             <div>
-              <div className="brand-name">ClipVault</div>
+              <div className="brand-name">VOLT</div>
               <div className="brand-caption">Private clipboard</div>
             </div>
           </div>
@@ -394,8 +396,8 @@ export default function Dashboard({ user }) {
             </button>
             <div className="sync-status"><span className="status-dot" />Synced</div>
             <div className="user-menu">
-              <div className="avatar">{getInitials(user.email)}</div>
-              <span className="user-email">{user.email}</span>
+              <div className="avatar">{getInitials(profile?.display_name || user.email)}</div>
+              <span className="user-email">@{profile?.username || 'guest'}</span>
               <button className="icon-button" title="Menu" onClick={(e) => { e.stopPropagation(); setShowUserMenu(!showUserMenu) }}>
                 <IconMenu />
               </button>

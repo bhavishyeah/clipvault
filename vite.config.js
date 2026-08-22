@@ -15,9 +15,9 @@ export default defineConfig({
       ],
 
       manifest: {
-        name: 'ClipVault',
-        short_name: 'ClipVault',
-        description: 'Your private cross-device clipboard vault',
+        name: 'VOLT',
+        short_name: 'VOLT',
+        description: 'The fastest way to move anything between devices',
         theme_color: '#08090f',
         background_color: '#08090f',
         display: 'standalone',

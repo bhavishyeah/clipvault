@@ -40,7 +40,7 @@ export default async function handler(req, res) {
     }
 
     // Create anonymous user via admin API
-    const anonEmail = `anon-${Date.now()}@clipvault.temp`
+    const anonEmail = `anon-${Date.now()}@volt.temp`
     const anonPassword = `anon-${session.token.slice(0, 32)}`
 
     const { data: userData, error: createError } = await supabase.auth.admin.createUser({

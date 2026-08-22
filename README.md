@@ -1,25 +1,19 @@
-# ClipVault
+# VOLT
 
-A privacy-focused cross-device clipboard vault. Save copied text, links, screenshots, and images from one device, then access them from another.
+The fastest way to move anything between devices. Save text, links, and images from one device, access them instantly from another.
 
 ## Tech Stack
 
 - **Frontend:** React 19 + Vite 8
 - **Auth & Database:** Supabase (PostgreSQL, Row Level Security, Realtime)
-- **Image Storage:** Cloudinary (new uploads) + Supabase Storage (legacy)
+- **Image Storage:** Cloudinary
 - **PWA:** vite-plugin-pwa (installable on Android)
 - **Hosting:** Vercel
 
 ## Getting Started
 
 ```bash
-# Install dependencies
 npm install
-
-# Create .env with your credentials
-cp .env.example .env
-
-# Start development server
 npm run dev
 ```
 
@@ -32,28 +26,28 @@ VITE_CLOUDINARY_CLOUD_NAME=your-cloud-name
 VITE_CLOUDINARY_UPLOAD_PRESET=your-upload-preset
 ```
 
+Vercel also needs: `SUPABASE_SERVICE_ROLE_KEY`
+
 ## Features
 
-- Email/password authentication
-- Global paste detection (Ctrl+V on desktop)
-- Mobile text/link input with paste box
-- Image upload via file picker and drag-and-drop (JPG/PNG, max 10MB)
+- Email/password + QR anonymous login
+- Username system (@username identity)
+- Global paste detection (Ctrl+V)
+- Image upload (JPG/PNG, 10MB max)
 - Real-time cross-device sync
-- Pin, search, filter, copy, download, and delete clips
-- Optimistic UI for instant feedback
-- Delete confirmation modal
-- Toast notifications for all actions
-- Dark glassmorphism design
-- Fully responsive (desktop + mobile)
+- Pin, search, sort, edit, delete clips
+- Drag-and-drop reorder for pinned clips
+- Optimistic UI, undo delete, duplicate detection
+- Code snippet detection
+- Dark/light theme
+- Bulk actions, export vault
+- Rate limiting, analytics
+- Error boundary, offline caching
 - Installable PWA
 
 ## Deployment
 
-The project auto-deploys via GitHub → Vercel. Ensure environment variables are set in Vercel project settings before deploying.
-
-## Database
-
-Run `supabase/schema.sql` in the Supabase SQL Editor to set up the `clips` table, RLS policies, storage bucket, and Realtime.
+Auto-deploys via GitHub → Vercel.
 
 ## License
 

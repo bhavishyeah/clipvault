@@ -1,4 +1,4 @@
-/* ClipVault — Global Reset */
+/* VOLT — Global Reset */
 
 *,
 *::before,
@@ -468,4 +468,94 @@ a {
   justify-content: center;
   margin-top: 20px;
   color: var(--success);
+}
+
+/* ==========================================================================
+   Onboarding — Username Input
+   ========================================================================== */
+
+.username-input-wrap {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  padding: 0 12px;
+}
+
+.username-input-wrap:focus-within {
+  border-color: var(--border-hover);
+}
+
+.username-at {
+  color: var(--text-muted);
+  font-size: 14px;
+  margin-right: 2px;
+}
+
+.username-input-wrap input {
+  flex: 1;
+  padding: 10px 0;
+  border: 0;
+  background: transparent;
+  font-size: 14px;
+  outline: none;
+}
+
+.username-status {
+  display: flex;
+  align-items: center;
+  width: 20px;
+}
+
+.status-dot-check {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border);
+  border-top-color: var(--text);
+  border-radius: 50%;
+  animation: spin .6s linear infinite;
+}
+
+.status-available {
+  color: var(--success);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.status-taken {
+  color: var(--danger);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.username-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.username-suggestions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  flex-wrap: wrap;
+}
+
+.username-suggestions button {
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.username-suggestions button:hover {
+  border-color: var(--border-hover);
+  color: var(--text);
 }

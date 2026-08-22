@@ -11,7 +11,7 @@ export default class ErrorBoundary extends Component {
   }
 
   componentDidCatch(error, info) {
-    console.error('ClipVault error:', error, info.componentStack)
+    console.error('VOLT error:', error, info.componentStack)
   }
 
   render() {
@@ -19,7 +19,7 @@ export default class ErrorBoundary extends Component {
       return (
         <div className="error-boundary">
           <h2>Something went wrong</h2>
-          <p>ClipVault encountered an unexpected error.</p>
+          <p>VOLT encountered an unexpected error.</p>
           <button onClick={() => window.location.reload()}>
             Reload app
           </button>

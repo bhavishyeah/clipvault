@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-const STORAGE_KEY = 'clipvault-theme'
+const STORAGE_KEY = 'volt-theme'
 
 export function useTheme() {
   const [theme, setTheme] = useState(() => {

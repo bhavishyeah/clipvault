@@ -1,4 +1,4 @@
-// Premium SVG icon set for ClipVault — no emojis
+// Premium SVG icon set for VOLT — no emojis
 
 export function IconVault(props) {
   return (

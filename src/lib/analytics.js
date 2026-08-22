@@ -1,7 +1,7 @@
-// ClipVault — Lightweight anonymous analytics
+// VOLT — Lightweight anonymous analytics
 // Tracks usage patterns locally. No external service, no PII.
 
-const STORAGE_KEY = 'clipvault-analytics'
+const STORAGE_KEY = 'volt-analytics'
 
 function getStore() {
   try {

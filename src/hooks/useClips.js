@@ -242,7 +242,7 @@ export function useClips(user) {
       const formData = new FormData()
       formData.append('file', blob)
       formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET)
-      formData.append('folder', `clipvault/${user.id}`)
+      formData.append('folder', `volt/${user.id}`)
 
       // Upload with XHR for progress tracking
       const uploaded = await new Promise((resolve, reject) => {
