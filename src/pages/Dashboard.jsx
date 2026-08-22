@@ -157,6 +157,7 @@ export default function Dashboard({ user, profile }) {
   const [sortOrder, setSortOrder] = useState('newest')
   const [editTarget, setEditTarget] = useState(null)
   const [showUserMenu, setShowUserMenu] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [bulkMode, setBulkMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
@@ -321,6 +322,28 @@ export default function Dashboard({ user, profile }) {
     await supabase.auth.signOut({ scope: 'global' })
     setShowUserMenu(false)
   }
+
+  const deleteAccount = async () => {
+    const { data: sessionData } = await supabase.auth.getSession()
+    const accessToken = sessionData?.session?.access_token
+    if (!accessToken) { toast('Session expired', 'error'); return }
+
+    const res = await fetch('/api/delete-account', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: user.id, access_token: accessToken }),
+    })
+
+    if (res.ok) {
+      toast('Account deleted')
+      await supabase.auth.signOut()
+    } else {
+      const data = await res.json()
+      toast(data.error || 'Failed to delete account', 'error')
+    }
+    setShowDeleteConfirm(false)
+    setShowUserMenu(false)
+  }
   const signOut = async () => {
     if (isAnonymous) {
       // Anonymous: always destroy everything on any sign out
@@ -410,6 +433,7 @@ export default function Dashboard({ user, profile }) {
                   <button onClick={exportVault}>Export vault</button>
                   <button onClick={signOut}><IconLogOut style={{ marginRight: 8, verticalAlign: 'middle' }} />Sign out</button>
                   <button onClick={signOutAll}>Sign out all devices</button>
+                  <button onClick={() => { setShowDeleteConfirm(true); setShowUserMenu(false) }} style={{ color: 'var(--danger)' }}>Delete account</button>
                 </div>
               )}
             </div>
@@ -585,6 +609,15 @@ export default function Dashboard({ user, profile }) {
           </div>
         </div>
       )}
+
+      {/* Delete account confirmation */}
+      <ConfirmModal
+        open={showDeleteConfirm}
+        title="Delete your account?"
+        message="Your account and username will be deleted. Your saved clips will remain in the database."
+        onConfirm={deleteAccount}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
     </main>
   )
 }
