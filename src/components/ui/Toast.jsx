@@ -5,7 +5,7 @@ export default function ToastContainer() {
   const [toasts, setToasts] = useState([])
 
   useEffect(() => {
-    setToastHandler((t) => setToasts((prev) => [...prev, t]))
+    setToastHandler((t) => setToasts((prev) => [...prev.slice(-4), t])) // Max 5 toasts visible
     return () => clearToastHandler()
   }, [])
 

@@ -63,20 +63,25 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
         return
       }
 
-      const formData = new FormData()
-      formData.append('file', image.file)
-      formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET)
-      formData.append('folder', `volt/${userId}`)
+      try {
+        const formData = new FormData()
+        formData.append('file', image.file)
+        formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET)
+        formData.append('folder', `volt/${userId}`)
 
-      const res = await fetch(
-        `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`,
-        { method: 'POST', body: formData }
-      )
-      const uploaded = await res.json()
-      if (!res.ok) { toast('Upload failed', 'error'); return }
+        const res = await fetch(
+          `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`,
+          { method: 'POST', body: formData }
+        )
+        const uploaded = await res.json()
+        if (!res.ok) { toast('Upload failed', 'error'); return }
 
-      fileData = { url: uploaded.secure_url, name: image.file.name, size: uploaded.bytes, mime: image.file.type }
-      finalContent = null
+        fileData = { url: uploaded.secure_url, name: image.file.name, size: uploaded.bytes, mime: image.file.type }
+        finalContent = null
+      } catch {
+        toast('Upload failed — check your connection', 'error')
+        return
+      }
     } else if (isUrl(finalContent)) {
       type = 'link'
     }
