@@ -322,7 +322,6 @@ export function useClips(user) {
 
     // TODO: Delete Cloudinary asset server-side (requires secure backend endpoint)
 
-    toast('Clip deleted')
     trackEvent('delete')
   }, [])
 

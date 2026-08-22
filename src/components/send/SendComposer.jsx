@@ -36,6 +36,8 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
     const file = e.target.files?.[0]
     if (!file) return
     if (file.size > 10 * 1024 * 1024) { toast('Max 10MB', 'error'); return }
+    // Revoke previous preview URL if exists
+    if (image?.preview) URL.revokeObjectURL(image.preview)
     setImage({ file, preview: URL.createObjectURL(file) })
     e.target.value = ''
   }
@@ -102,7 +104,7 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
           {image ? (
             <div className="send-image-preview">
               <img src={image.preview} alt="To send" />
-              <button onClick={() => setImage(null)} className="send-remove-image">Remove</button>
+              <button onClick={() => { if (image?.preview) URL.revokeObjectURL(image.preview); setImage(null) }} className="send-remove-image">Remove</button>
             </div>
           ) : (
             <textarea

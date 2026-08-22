@@ -54,8 +54,9 @@ export function usePresence(user) {
 
     // Handle before unload (tab/window close)
     const handleBeforeUnload = () => {
-      // Best effort offline signal using sendBeacon
-      navigator.sendBeacon?.(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/presence?user_id=eq.${user.id}`)
+      // Mark offline synchronously — best effort
+      // sendBeacon doesn't work with Supabase auth headers
+      // The heartbeat timeout on server will mark user offline within 60s
     }
 
     document.addEventListener('visibilitychange', handleVisibility)
