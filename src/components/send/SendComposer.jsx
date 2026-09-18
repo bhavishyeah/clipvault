@@ -1,15 +1,20 @@
 import { useRef, useState } from 'react'
 import { IconSearch, IconUpload } from '../ui/Icons'
 import { toast } from '../ui/toastStore'
-
-const CLOUDINARY_CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
-const CLOUDINARY_UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
+import FileCard from '../ui/FileCard'
+import { uploadFile, SizeError } from '../../lib/uploadFile'
+import { classifyFile, validateFile, humanSize } from '../../lib/fileType'
 
 const isUrl = (text) => /^(https?:\/\/)?[\w.-]+\.[a-z]{2,}([/?#].*)?$/i.test(text)
 
+// Broadened picker scope: images, audio, and common document types. Selections
+// are still gated by `validateFile` in the pick handler, so the accept list is
+// only a first-pass filter for the native dialog.
+const ACCEPT = 'image/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip'
+
 export default function SendComposer({ onClose, searchUsers, sendTo, sending, userId, contacts, addContact, removeContact }) {
   const [content, setContent] = useState('')
-  const [image, setImage] = useState(null)
+  const [attachment, setAttachment] = useState(null)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
   const [selectedUser, setSelectedUser] = useState(null)
@@ -32,14 +37,37 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
     }, 300)
   }
 
-  const handleImagePick = (e) => {
+  const clearAttachment = () => {
+    setAttachment((prev) => {
+      if (prev?.preview) URL.revokeObjectURL(prev.preview)
+      return null
+    })
+  }
+
+  // Gate the selection on `validateFile` BEFORE upload. On rejection we toast
+  // and return, retaining composer state (content/recipient are untouched).
+  const handleFilePick = (e) => {
     const file = e.target.files?.[0]
-    if (!file) return
-    if (file.size > 10 * 1024 * 1024) { toast('Max 10MB', 'error'); return }
-    // Revoke previous preview URL if exists
-    if (image?.preview) URL.revokeObjectURL(image.preview)
-    setImage({ file, preview: URL.createObjectURL(file) })
     e.target.value = ''
+    if (!file) return
+
+    const check = validateFile({ type: file.type, size: file.size })
+    if (!check.ok) {
+      const message =
+        check.reason === 'too_large'
+          ? `Too large — max ${humanSize(check.limit)}`
+          : 'File is empty'
+      toast(message, 'error')
+      return
+    }
+
+    const kind = classifyFile(file.type)
+    if (attachment?.preview) URL.revokeObjectURL(attachment.preview)
+    setAttachment({
+      file,
+      kind,
+      preview: kind === 'image' ? URL.createObjectURL(file) : null,
+    })
   }
 
   const selectUser = (u) => {
@@ -50,36 +78,24 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
 
   const handleSend = async () => {
     if (!selectedUser) { toast('Select a recipient', 'error'); return }
-    if (!content.trim() && !image) { toast('Add content to send', 'error'); return }
+    if (!content.trim() && !attachment) { toast('Add content to send', 'error'); return }
 
     let type = 'text'
     let finalContent = content.trim()
     let fileData = null
 
-    if (image) {
-      type = 'image'
-      if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) {
-        toast('Image upload not configured', 'error')
-        return
-      }
-
+    if (attachment) {
+      type = attachment.kind
       try {
-        const formData = new FormData()
-        formData.append('file', image.file)
-        formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET)
-        formData.append('folder', `volt/${userId}`)
-
-        const res = await fetch(
-          `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`,
-          { method: 'POST', body: formData }
-        )
-        const uploaded = await res.json()
-        if (!res.ok) { toast('Upload failed', 'error'); return }
-
-        fileData = { url: uploaded.secure_url, name: image.file.name, size: uploaded.bytes, mime: image.file.type }
+        // Shared Upload_Service handles the size gate, resource routing and
+        // response normalization into an UploadDescriptor.
+        fileData = await uploadFile(attachment.file, { userId })
         finalContent = null
-      } catch {
-        toast('Upload failed — check your connection', 'error')
+      } catch (err) {
+        // SizeError carries its own human message; other failures fall back to
+        // a generic message. In both cases the composer stays open.
+        const message = err instanceof SizeError ? err.message : 'Upload failed — check your connection'
+        toast(message, 'error')
         return
       }
     } else if (isUrl(finalContent)) {
@@ -106,27 +122,34 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
 
         {/* Content input */}
         <div className="send-content-area">
-          {image ? (
-            <div className="send-image-preview">
-              <img src={image.preview} alt="To send" />
-              <button onClick={() => { if (image?.preview) URL.revokeObjectURL(image.preview); setImage(null) }} className="send-remove-image">Remove</button>
-            </div>
+          {attachment ? (
+            attachment.kind === 'image' ? (
+              <div className="send-image-preview">
+                <img src={attachment.preview} alt="To send" />
+                <button onClick={clearAttachment} className="send-remove-image">Remove</button>
+              </div>
+            ) : (
+              <div className="send-file-preview">
+                <FileCard kind={attachment.kind} name={attachment.file.name} size={attachment.file.size} />
+                <button onClick={clearAttachment} className="send-remove-image">Remove</button>
+              </div>
+            )
           ) : (
             <textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}
               onPaste={(e) => e.stopPropagation()}
-              placeholder="Paste text, link, or drop an image..."
+              placeholder="Paste text, link, or attach a file..."
               rows={3}
               maxLength={10000}
             />
           )}
-          {!image && (
+          {!attachment && (
             <button className="send-attach" onClick={() => fileRef.current?.click()}>
-              <IconUpload width="14" height="14" /> Image
+              <IconUpload width="14" height="14" /> Attach
             </button>
           )}
-          <input ref={fileRef} type="file" accept=".jpg,.jpeg,.png" onChange={handleImagePick} hidden />
+          <input ref={fileRef} type="file" accept={ACCEPT} onChange={handleFilePick} hidden />
         </div>
 
         {/* Contacts (quick pick) */}
@@ -191,7 +214,7 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
         <button
           className="send-button"
           onClick={handleSend}
-          disabled={sending || (!content.trim() && !image) || !selectedUser}
+          disabled={sending || (!content.trim() && !attachment) || !selectedUser}
         >
           {sending ? 'Sending...' : 'Send'}
         </button>

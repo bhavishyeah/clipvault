@@ -1,4 +1,5 @@
 import { IconDownload } from '../ui/Icons'
+import FileCard from '../ui/FileCard'
 
 export default function IncomingTransfers({ transfers, onSaveToVault, onDismiss }) {
   if (transfers.length === 0) return null
@@ -20,6 +21,8 @@ export default function IncomingTransfers({ transfers, onSaveToVault, onDismiss 
               <div className="incoming-image-wrap">
                 <img src={t.file_url} alt="Received" loading="lazy" />
               </div>
+            ) : t.type === 'file' || t.type === 'audio' ? (
+              <FileCard kind={t.type} name={t.file_name} size={t.file_size} url={t.file_url} />
             ) : (
               <p className="incoming-content">{t.content}</p>
             )}
