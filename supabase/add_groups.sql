@@ -79,4 +79,17 @@ create policy "members send messages" on public.group_messages
     public.is_group_member(group_id, auth.uid()) and auth.uid() = sender_id
   );
 
-alter publication supabase_realtime add table public.group_messages;
+-- Add group_messages to the Realtime publication (idempotent: adding a table
+-- that is already a member of the publication raises an error, so guard it so
+-- the whole migration can be safely re-run).
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'group_messages'
+  ) then
+    alter publication supabase_realtime add table public.group_messages;
+  end if;
+end $$;
