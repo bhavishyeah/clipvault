@@ -64,6 +64,11 @@ const formatBytes = (bytes) => {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+// Guard against optimistic temporary group ids (e.g. "temp-1789731875105").
+// Only real, persisted group ids are valid uuids that can be queried against
+// group_members; temp ids would trigger a 400 (Postgres 22P02) on the backend.
+const isRealGroupId = (id) => typeof id === 'string' && !id.startsWith('temp-')
+
 // Desktop paste input with char count, auto-focus, duplicate detection
 function DesktopPasteInput({ onSave, saving, clips }) {
   const [text, setText] = useState('')
@@ -226,6 +231,7 @@ export default function Dashboard({ user, profile }) {
       }
       const entries = await Promise.all(
         groups.map(async (g) => {
+          if (!isRealGroupId(g.id)) return [g.id, 0]
           const list = await fetchMembers(g.id)
           return [g.id, list.length]
         })
@@ -242,7 +248,7 @@ export default function Dashboard({ user, profile }) {
   useEffect(() => {
     let cancelled = false
     const load = async () => {
-      if (!selectedGroupId) {
+      if (!selectedGroupId || !isRealGroupId(selectedGroupId)) {
         if (!cancelled) setSelectedGroupMembers((prev) => (prev.length ? [] : prev))
         return
       }
@@ -448,6 +454,7 @@ export default function Dashboard({ user, profile }) {
 
   // Refresh the member-count for a single group after membership changes.
   const refreshGroupCount = useCallback(async (groupId) => {
+    if (!isRealGroupId(groupId)) return
     const list = await fetchMembers(groupId)
     setGroupMemberCounts((prev) => ({ ...prev, [groupId]: list.length }))
     if (groupId === selectedGroupId) setSelectedGroupMembers(list)

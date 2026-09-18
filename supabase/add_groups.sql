@@ -51,20 +51,28 @@ alter table public.group_members enable row level security;
 alter table public.group_messages enable row level security;
 
 -- groups: members can see their groups; owner can delete (Req 11.5/11.6); creator can insert
+drop policy if exists "members read groups" on public.groups;
 create policy "members read groups" on public.groups
-  for select using (public.is_group_member(id, auth.uid()));
+  for select using (
+    owner_id = auth.uid() or public.is_group_member(id, auth.uid())
+  );
+drop policy if exists "creator inserts group" on public.groups;
 create policy "creator inserts group" on public.groups
   for insert with check (auth.uid() = owner_id);
+drop policy if exists "owner deletes group" on public.groups;
 create policy "owner deletes group" on public.groups
   for delete using (auth.uid() = owner_id);
 
 -- group_members: members read (Req 15.3/15.4); owner inserts/deletes (Req 15.5); self-leave
+drop policy if exists "members read membership" on public.group_members;
 create policy "members read membership" on public.group_members
   for select using (public.is_group_member(group_id, auth.uid()));
+drop policy if exists "owner adds members" on public.group_members;
 create policy "owner adds members" on public.group_members
   for insert with check (
     exists (select 1 from public.groups g where g.id = group_id and g.owner_id = auth.uid())
   );
+drop policy if exists "owner removes or member leaves" on public.group_members;
 create policy "owner removes or member leaves" on public.group_members
   for delete using (
     exists (select 1 from public.groups g where g.id = group_id and g.owner_id = auth.uid())
@@ -72,8 +80,10 @@ create policy "owner removes or member leaves" on public.group_members
   );
 
 -- group_messages: members read (Req 15.1/15.2) and insert (Req 14.1/14.4/15.6)
+drop policy if exists "members read messages" on public.group_messages;
 create policy "members read messages" on public.group_messages
   for select using (public.is_group_member(group_id, auth.uid()));
+drop policy if exists "members send messages" on public.group_messages;
 create policy "members send messages" on public.group_messages
   for insert with check (
     public.is_group_member(group_id, auth.uid()) and auth.uid() = sender_id
