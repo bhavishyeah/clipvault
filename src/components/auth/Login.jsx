@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { supabase } from '../../lib/supabaseClient'
+import { needsMfaChallenge } from '../../lib/mfa'
 import { IconVault } from '../ui/Icons'
 import QRLogin from './QRLogin'
+import MfaChallenge from './MfaChallenge'
 
 export default function Login() {
   const [mode, setMode] = useState('login') // 'login' | 'signup' | 'reset'
@@ -11,6 +13,9 @@ export default function Login() {
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
+  // When a signed-in session has an activated factor but has not reached AAL2,
+  // hold at the challenge step here rather than letting App proceed to the vault.
+  const [challengeUser, setChallengeUser] = useState(null)
 
   const isSignup = mode === 'signup'
   const isReset = mode === 'reset'
@@ -41,13 +46,36 @@ export default function Login() {
       else if (data.session) setMessage('Account created.')
       else setMessage('Account created. Check email for confirmation.')
     } else {
-      const { error: e } = await supabase.auth.signInWithPassword({ email: normalizedEmail, password })
-      if (e) setError(e.message)
+      const { data, error: e } = await supabase.auth.signInWithPassword({ email: normalizedEmail, password })
+      if (e) {
+        setError(e.message)
+      } else {
+        // Credentials are valid (Req 7.1). Evaluate MFA before letting the app
+        // reach the vault: if the account requires AAL2 but the session is at
+        // AAL1, hold at the challenge step (Req 7.2).
+        const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+        if (aal && needsMfaChallenge(aal.currentLevel, aal.nextLevel)) {
+          setChallengeUser(data?.session?.user ?? data?.user ?? null)
+        }
+      }
     }
     setBusy(false)
   }
 
   const switchMode = (m) => { setMode(m); setError(''); setMessage(''); setPassword(''); setConfirmPassword('') }
+
+  // MFA challenge step — shown after a valid password when the account requires
+  // a second factor. On success the session becomes AAL2 (or recovery-elevated)
+  // and App's gate picks it up; here we simply clear the challenge state.
+  if (challengeUser) {
+    return (
+      <MfaChallenge
+        user={challengeUser}
+        onVerified={() => setChallengeUser(null)}
+        onCancel={async () => { await supabase.auth.signOut(); setChallengeUser(null) }}
+      />
+    )
+  }
 
   return (
     <main className="auth-page">

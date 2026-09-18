@@ -3,6 +3,8 @@ import { supabase } from '../lib/supabaseClient'
 import { toast } from '../components/ui/toastStore'
 import { trackEvent } from '../lib/analytics'
 import { checkRateLimit } from '../lib/rateLimit'
+import { uploadFile, SizeError } from '../lib/uploadFile'
+import { classifyFile, validateFile, SIZE_LIMITS } from '../lib/fileType'
 
 const SUPABASE_BUCKET = 'clips'
 const CLOUDINARY_CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
@@ -221,12 +223,28 @@ export function useClips(user) {
     setSaving(false)
   }, [user])
 
-  // --- Save image with progress ---
-  const saveImage = useCallback(async (blob, options = {}) => {
-    if (!user) return
+  // --- Save a file / audio / image with progress (generic upload path) ---
+  // Handles Document_File, Audio_File, and image clips: validates the size
+  // gate first (toast + early return on failure), uploads through the shared
+  // Upload_Service, then stores a clip whose type is derived from the MIME
+  // type and whose metadata carries the Cloudinary descriptor. Uses the same
+  // optimistic-insert / rollback-on-error pattern as saveText.
+  const saveFile = useCallback(async (file, options = {}) => {
+    if (!file || !user) return
 
     if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) {
-      toast('Image upload not configured', 'error')
+      toast('Upload not configured', 'error')
+      return
+    }
+
+    // Size gate BEFORE any upload (Req 1.6). No clip is inserted on rejection.
+    const check = validateFile({ type: file.type, size: file.size })
+    if (!check.ok) {
+      const message =
+        check.reason === 'too_large'
+          ? `File exceeds the ${check.limit === SIZE_LIMITS.audio ? '10' : '15'} MB limit`
+          : 'File is empty'
+      toast(message, 'error')
       return
     }
 
@@ -235,55 +253,46 @@ export function useClips(user) {
       return
     }
 
+    const type = classifyFile(file.type)
+    const optimisticId = `temp-${Date.now()}`
+    const optimistic = {
+      id: optimisticId,
+      user_id: user.id,
+      type,
+      content: null,
+      metadata: {
+        provider: 'cloudinary',
+        secure_url: null,
+        mime: file.type,
+        name: file.name,
+        bytes: file.size,
+      },
+      is_pinned: false,
+      expires_at: options.expiresAt || null,
+      created_at: new Date().toISOString(),
+    }
+
     setSaving(true)
     setUploadProgress(0)
+    setClips((prev) => sortClips([optimistic, ...prev]))
 
     try {
-      const formData = new FormData()
-      formData.append('file', blob)
-      formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET)
-      formData.append('folder', `volt/${user.id}`)
-
-      // Upload with XHR for progress tracking
-      const uploaded = await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest()
-
-        xhr.upload.addEventListener('progress', (e) => {
-          if (e.lengthComputable) {
-            const pct = Math.round((e.loaded / e.total) * 100)
-            setUploadProgress(pct)
-          }
-        })
-
-        xhr.addEventListener('load', () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            resolve(JSON.parse(xhr.responseText))
-          } else {
-            const err = JSON.parse(xhr.responseText)
-            reject(new Error(err.error?.message || 'Upload failed'))
-          }
-        })
-
-        xhr.addEventListener('error', () => reject(new Error('Network error')))
-        xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')))
-
-        xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`)
-        xhr.send(formData)
+      const descriptor = await uploadFile(file, {
+        userId: user.id,
+        onProgress: setUploadProgress,
       })
 
       const insertData = {
         user_id: user.id,
-        type: 'image',
+        type,
         metadata: {
           provider: 'cloudinary',
-          secure_url: uploaded.secure_url,
-          public_id: uploaded.public_id,
-          resource_type: uploaded.resource_type,
-          format: uploaded.format,
-          bytes: uploaded.bytes,
-          width: uploaded.width,
-          height: uploaded.height,
-          mime: blob.type,
+          secure_url: descriptor.secure_url,
+          resource_type: descriptor.resource_type,
+          bytes: descriptor.bytes,
+          format: descriptor.format,
+          mime: descriptor.mime,
+          name: descriptor.name,
         },
       }
       if (options.expiresAt) insertData.expires_at = options.expiresAt
@@ -292,16 +301,45 @@ export function useClips(user) {
 
       if (error) throw new Error(error.message)
 
-      toast('Image saved')
-      trackEvent('save_image')
+      toast(type === 'image' ? 'Image saved' : type === 'audio' ? 'Audio saved' : 'File saved')
+      trackEvent(type === 'image' ? 'save_image' : 'save_file')
     } catch (err) {
-      toast('Failed to upload image', 'error')
-      console.error('Could not save image:', err.message)
+      // Roll back the optimistic entry — nothing is stored on failure (Req 1.7).
+      setClips((prev) => prev.filter((c) => c.id !== optimisticId))
+      if (err instanceof SizeError) {
+        toast(err.message, 'error')
+      } else {
+        toast(`Failed to upload ${type === 'image' ? 'image' : 'file'}`, 'error')
+      }
+      console.error('Could not save file:', err.message)
     } finally {
       setSaving(false)
       setUploadProgress(0)
     }
   }, [user])
+
+  // --- Save image (thin wrapper delegating to saveFile) ---
+  // Preserves the existing paste/image behavior. Clipboard blobs may lack a
+  // usable name, so construct a File with a generated name and the blob's
+  // MIME type before delegating.
+  const saveImage = useCallback(async (blob, options = {}) => {
+    if (!blob) return
+
+    let file = blob
+    if (typeof File !== 'undefined' && !(blob instanceof File)) {
+      const ext = (blob.type?.split('/')[1] || 'png').split('+')[0]
+      file = new File([blob], `image-${Date.now()}.${ext}`, {
+        type: blob.type || 'image/png',
+      })
+    } else if (!blob.name) {
+      const ext = (blob.type?.split('/')[1] || 'png').split('+')[0]
+      file = new File([blob], `image-${Date.now()}.${ext}`, {
+        type: blob.type || 'image/png',
+      })
+    }
+
+    return saveFile(file, options)
+  }, [saveFile])
 
   // --- Remove clip (optimistic) ---
   const removeClip = useCallback(async (clip) => {
@@ -418,6 +456,7 @@ export function useClips(user) {
     saving,
     uploadProgress,
     saveText,
+    saveFile,
     saveImage,
     removeClip,
     togglePin,

@@ -5,6 +5,7 @@ import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
 import { useTheme } from '../hooks/useTheme'
 import { usePresence } from '../hooks/usePresence'
 import { useDirectSend } from '../hooks/useDirectSend'
+import { useGroups } from '../hooks/useGroups'
 import PasteZone from '../components/clips/PasteZone'
 import MobilePasteBox from '../components/clips/MobilePasteBox'
 import ImageUpload from '../components/clips/ImageUpload'
@@ -13,8 +14,16 @@ import ToastContainer from '../components/ui/Toast'
 import { toast } from '../components/ui/toastStore'
 import ConfirmModal from '../components/ui/ConfirmModal'
 import EditModal from '../components/ui/EditModal'
+import ClipBody from '../components/clips/ClipBody'
 import SendComposer from '../components/send/SendComposer'
 import IncomingTransfers from '../components/send/IncomingTransfers'
+import RecipientTabs from '../components/send/RecipientTabs'
+import GroupCreateModal from '../components/groups/GroupCreateModal'
+import GroupThread from '../components/groups/GroupThread'
+import MemberList from '../components/groups/MemberList'
+import GroupComposer from '../components/groups/GroupComposer'
+import AddMemberModal from '../components/groups/AddMemberModal'
+import SecuritySettings from '../components/auth/SecuritySettings'
 import {
   IconVault, IconCopy, IconTrash, IconEdit, IconPin, IconPinFilled,
   IconDownload, IconExternalLink, IconSearch, IconImage, IconText, IconLink,
@@ -39,16 +48,6 @@ const getInitials = (name = '') => {
   return name.slice(0, 2).toUpperCase()
 }
 
-const getFaviconUrl = (url) => {
-  try {
-    const domain = url?.replace(/^https?:\/\//, '').split('/')[0]
-    if (!domain) return null
-    return `https://www.google.com/s2/favicons?domain=${domain}&sz=32`
-  } catch {
-    return null
-  }
-}
-
 const calculateStorageUsage = (clips) => {
   let totalBytes = 0
   let imageCount = 0
@@ -63,24 +62,6 @@ const formatBytes = (bytes) => {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-// Detect if content looks like code
-const isCodeSnippet = (text) => {
-  if (!text) return false
-  const codeSignals = [
-    /^(import|export|const|let|var|function|class|if|for|while|return|async|await)\s/m,
-    /[{}[\]();].*[{}[\]();]/,
-    /=>/,
-    /^\s*(\/\/|\/\*|#!)/m,
-    /<\/?[a-z][\w-]*[\s>]/i,
-    /\.\w+\(.*\)/,
-  ]
-  let matches = 0
-  for (const pattern of codeSignals) {
-    if (pattern.test(text)) matches++
-  }
-  return matches >= 2
 }
 
 // Desktop paste input with char count, auto-focus, duplicate detection
@@ -156,6 +137,25 @@ export default function Dashboard({ user, profile }) {
   const { incoming, contacts, sending: directSending, searchUsers, sendTo, addContact, removeContact, saveToVault, dismissTransfer } = useDirectSend(user)
   const [showSendComposer, setShowSendComposer] = useState(false)
 
+  // Groups (Feature 3)
+  const {
+    groups, messagesByGroup, createGroup, deleteGroup,
+    addMember, removeMember, leaveGroup, members: fetchMembers,
+    sendToGroup, subscribeGroup,
+  } = useGroups(user)
+
+  // Sharing panel + group UI state
+  const [showSharing, setShowSharing] = useState(false)
+  const [showGroupCreate, setShowGroupCreate] = useState(false)
+  const [selectedRecipient, setSelectedRecipient] = useState(null)
+  const [selectedGroupId, setSelectedGroupId] = useState(null)
+  const [groupMemberCounts, setGroupMemberCounts] = useState({})
+  const [selectedGroupMembers, setSelectedGroupMembers] = useState([])
+  const [addMemberTarget, setAddMemberTarget] = useState(null)
+
+  // Security settings modal (Feature 2) — mounts SecuritySettings which owns useMfa
+  const [showSecurity, setShowSecurity] = useState(false)
+
   const isAnonymous = user.user_metadata?.is_anonymous === true
   const [showConvert, setShowConvert] = useState(false)
   const [convertEmail, setConvertEmail] = useState('')
@@ -212,6 +212,57 @@ export default function Dashboard({ user, profile }) {
     window.clearTimeout(searchTimer.current)
     searchTimer.current = window.setTimeout(() => { setDebouncedQuery(value); if (value.trim()) trackEvent('search') }, 200)
   }
+
+  // Resolve member counts for the user's groups so RecipientTabs can gate
+  // zero-member groups and show a "delivers to all N members" indicator.
+  // useGroups.groups does not carry memberCount, so we build a { groupId: count }
+  // map here by asking the hook for each group's members once per group set.
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      if (!groups.length) {
+        if (!cancelled) setGroupMemberCounts((prev) => (Object.keys(prev).length ? {} : prev))
+        return
+      }
+      const entries = await Promise.all(
+        groups.map(async (g) => {
+          const list = await fetchMembers(g.id)
+          return [g.id, list.length]
+        })
+      )
+      if (cancelled) return
+      setGroupMemberCounts(Object.fromEntries(entries))
+    }
+    load()
+    return () => { cancelled = true }
+  }, [groups, fetchMembers])
+
+  // Load the roster for the currently viewed group (for MemberList). Refreshes
+  // whenever the selected group changes or membership is edited via the counts map.
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      if (!selectedGroupId) {
+        if (!cancelled) setSelectedGroupMembers((prev) => (prev.length ? [] : prev))
+        return
+      }
+      const list = await fetchMembers(selectedGroupId)
+      if (!cancelled) setSelectedGroupMembers(list)
+    }
+    load()
+    return () => { cancelled = true }
+  }, [selectedGroupId, fetchMembers, groupMemberCounts])
+
+  // Groups augmented with a resolved memberCount for RecipientTabs.
+  const groupsWithCounts = useMemo(
+    () => groups.map((g) => ({ ...g, memberCount: groupMemberCounts[g.id] ?? 0 })),
+    [groups, groupMemberCounts]
+  )
+
+  const selectedGroup = useMemo(
+    () => groupsWithCounts.find((g) => g.id === selectedGroupId) ?? null,
+    [groupsWithCounts, selectedGroupId]
+  )
 
   const filteredClips = useMemo(() => {
     const q = debouncedQuery.trim().toLowerCase()
@@ -395,6 +446,64 @@ export default function Dashboard({ user, profile }) {
     setConvertBusy(false)
   }
 
+  // Refresh the member-count for a single group after membership changes.
+  const refreshGroupCount = useCallback(async (groupId) => {
+    const list = await fetchMembers(groupId)
+    setGroupMemberCounts((prev) => ({ ...prev, [groupId]: list.length }))
+    if (groupId === selectedGroupId) setSelectedGroupMembers(list)
+  }, [fetchMembers, selectedGroupId])
+
+  // Create a group, then add any members chosen in the modal (GroupCreateModal
+  // passes (name, members[]); useGroups.createGroup takes only the name, so we
+  // add the selected members afterward against the persisted group).
+  const handleCreateGroup = useCallback(async (name, membersToAdd = []) => {
+    const created = await createGroup(name)
+    if (!created) return null
+    for (const member of membersToAdd) {
+      await addMember(created.id, member)
+    }
+    await refreshGroupCount(created.id)
+    return created
+  }, [createGroup, addMember, refreshGroupCount])
+
+  // A recipient chosen in RecipientTabs. A group selection opens the group view;
+  // a contact selection opens the existing SendComposer pre-focused on contacts.
+  const handleSelectRecipient = useCallback((recipient) => {
+    setSelectedRecipient(recipient)
+    if (recipient?.kind === 'group') {
+      setSelectedGroupId(recipient.id)
+    } else {
+      setSelectedGroupId(null)
+    }
+  }, [])
+
+  // MemberList add/remove wiring. onAddMember opens an inline search modal;
+  // onRemoveMember removes directly and refreshes the roster/counts.
+  const handleRemoveMember = useCallback(async (group, userId) => {
+    const ok = await removeMember(group.id, userId)
+    if (ok) await refreshGroupCount(group.id)
+  }, [removeMember, refreshGroupCount])
+
+  const handleAddMemberConfirm = useCallback(async (member) => {
+    if (!addMemberTarget) return
+    const ok = await addMember(addMemberTarget.id, member)
+    if (ok) await refreshGroupCount(addMemberTarget.id)
+  }, [addMember, addMemberTarget, refreshGroupCount])
+
+  const handleDeleteGroup = useCallback(async (groupId) => {
+    await deleteGroup(groupId)
+    if (groupId === selectedGroupId) { setSelectedGroupId(null); setSelectedRecipient(null) }
+    setGroupMemberCounts((prev) => {
+      if (!(groupId in prev)) return prev
+      const next = { ...prev }; delete next[groupId]; return next
+    })
+  }, [deleteGroup, selectedGroupId])
+
+  const handleLeaveGroup = useCallback(async (groupId) => {
+    const ok = await leaveGroup(groupId)
+    if (ok && groupId === selectedGroupId) { setSelectedGroupId(null); setSelectedRecipient(null) }
+  }, [leaveGroup, selectedGroupId])
+
   const getTypeIcon = (type) => {
     if (type === 'image') return <IconImage />
     if (type === 'link') return <IconLink />
@@ -442,6 +551,9 @@ export default function Dashboard({ user, profile }) {
                     <span>{storageUsage.imageCount} images</span>
                   </div>
                   <button onClick={exportVault}>Export vault</button>
+                  {!isAnonymous && (
+                    <button onClick={() => { setShowSecurity(true); setShowUserMenu(false) }}>Security &amp; 2FA</button>
+                  )}
                   <button onClick={signOut}><IconLogOut style={{ marginRight: 8, verticalAlign: 'middle' }} />Sign out</button>
                   <button onClick={signOutAll}>Sign out all devices</button>
                   <button onClick={() => { setShowDeleteConfirm(true); setShowUserMenu(false) }} style={{ color: 'var(--danger)' }}>Delete account</button>
@@ -480,11 +592,16 @@ export default function Dashboard({ user, profile }) {
         <PasteZone onText={saveText} onImage={saveImage} />
         <MobilePasteBox onSave={saveText} onImage={saveImage} saving={saving} />
 
-        {/* Send To button */}
+        {/* Send To + Sharing buttons */}
         {!isAnonymous && (
-          <button className="send-to-button" onClick={() => setShowSendComposer(true)}>
-            Send to @user
-          </button>
+          <div className="share-actions">
+            <button className="send-to-button" onClick={() => setShowSendComposer(true)}>
+              Send to @user
+            </button>
+            <button className="share-panel-button" onClick={() => setShowSharing(true)}>
+              Contacts &amp; groups
+            </button>
+          </div>
         )}
 
         {/* Incoming transfers */}
@@ -557,19 +674,7 @@ export default function Dashboard({ user, profile }) {
                   </div>
                 </div>
 
-                {clip.type === 'image' ? (
-                  <div className="image-preview-wrap"><img src={clip.url} alt="Clip" className="image-preview" loading="lazy" /></div>
-                ) : clip.type === 'link' ? (
-                  <div className="link-preview">
-                    <img src={getFaviconUrl(clip.content)} alt="" className="link-favicon" width="16" height="16" loading="lazy" />
-                    <div className="link-preview-text">
-                      <p className="clip-content">{clip.content}</p>
-                      <div className="link-domain">{clip.content?.replace(/^https?:\/\//, '').split('/')[0]}</div>
-                    </div>
-                  </div>
-                ) : (
-                  <p className={`clip-content ${isCodeSnippet(clip.content) ? 'code-snippet' : ''}`}>{clip.content}</p>
-                )}
+                <ClipBody clip={clip} />
 
                 {!bulkMode && (
                   <div className="clip-card-bottom">
@@ -653,6 +758,109 @@ export default function Dashboard({ user, profile }) {
           removeContact={removeContact}
         />
       )}
+
+      {/* Security & 2FA settings */}
+      {showSecurity && (
+        <div className="confirm-overlay" onClick={() => setShowSecurity(false)}>
+          <div className="security-modal" onClick={(e) => e.stopPropagation()}>
+            <button className="send-close security-modal-close" title="Close" onClick={() => setShowSecurity(false)}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+            <SecuritySettings user={user} />
+          </div>
+        </div>
+      )}
+
+      {/* Contacts & Groups sharing panel */}
+      {showSharing && (
+        <div className="confirm-overlay" onClick={() => { setShowSharing(false); setSelectedGroupId(null); setSelectedRecipient(null) }}>
+          <div className="sharing-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="send-header">
+              <h3>Contacts &amp; groups</h3>
+              <button className="send-close" title="Close" onClick={() => { setShowSharing(false); setSelectedGroupId(null); setSelectedRecipient(null) }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="sharing-toolbar">
+              <button className="share-panel-button" onClick={() => setShowGroupCreate(true)}>+ New group</button>
+            </div>
+
+            <RecipientTabs
+              contacts={contacts}
+              groups={groupsWithCounts}
+              selectedRecipient={selectedRecipient}
+              onSelectRecipient={handleSelectRecipient}
+            />
+
+            {/* Contact selected → jump into the direct Send Composer */}
+            {selectedRecipient?.kind === 'contact' && (
+              <button
+                className="send-button"
+                onClick={() => { setShowSharing(false); setShowSendComposer(true) }}
+              >
+                Compose message to {selectedRecipient.display_name || `@${selectedRecipient.username}`}
+              </button>
+            )}
+
+            {/* Group selected → group thread, composer, and member management */}
+            {selectedGroup && (
+              <div className="group-view">
+                <div className="group-view-header">
+                  <h4>{selectedGroup.name}</h4>
+                  {selectedGroup.isOwner ? (
+                    <button className="group-danger" onClick={() => handleDeleteGroup(selectedGroup.id)}>Delete group</button>
+                  ) : (
+                    <button className="group-danger" onClick={() => handleLeaveGroup(selectedGroup.id)}>Leave group</button>
+                  )}
+                </div>
+
+                <GroupThread
+                  group={selectedGroup}
+                  messages={messagesByGroup[selectedGroup.id] ?? []}
+                  currentUserId={user.id}
+                  onSubscribe={subscribeGroup}
+                />
+
+                <GroupComposer
+                  group={selectedGroup}
+                  userId={user.id}
+                  onSend={sendToGroup}
+                />
+
+                <MemberList
+                  group={selectedGroup}
+                  members={selectedGroupMembers}
+                  currentUserId={user.id}
+                  onAddMember={(g) => setAddMemberTarget(g)}
+                  onRemoveMember={handleRemoveMember}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Create group */}
+      <GroupCreateModal
+        open={showGroupCreate}
+        onClose={() => setShowGroupCreate(false)}
+        onCreate={handleCreateGroup}
+        searchUsers={searchUsers}
+      />
+
+      {/* Add member to a group (inline search) */}
+      <AddMemberModal
+        open={!!addMemberTarget}
+        group={addMemberTarget}
+        onClose={() => setAddMemberTarget(null)}
+        onAdd={handleAddMemberConfirm}
+        searchUsers={searchUsers}
+      />
     </main>
   )
 }

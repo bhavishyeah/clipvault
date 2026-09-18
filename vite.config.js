@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
@@ -114,4 +115,18 @@ export default defineConfig({
       },
     }),
   ],
+
+  test: {
+    // Default to jsdom so component/hook tests have a DOM. Pure/logic tests can
+    // opt into the faster node environment with a per-file docblock comment:
+    //   // @vitest-environment node
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['./src/test/setup.js'],
+    include: ['src/**/*.{test,spec}.{js,jsx}', 'api/**/*.{test,spec}.js'],
+    css: false,
+    // The default `forks` pool can hang spawning workers in some sandboxed /
+    // Windows environments; `threads` starts reliably.
+    pool: 'threads',
+  },
 })
