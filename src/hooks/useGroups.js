@@ -30,6 +30,11 @@ export function useGroups(user) {
   const [groups, setGroups] = useState([])
   const [messagesByGroup, setMessagesByGroup] = useState({})
   const [loading, setLoading] = useState(true)
+  // The group whose thread is currently open. While set (and pointing at a
+  // real, persisted id) it is polled so recipients still converge on the full
+  // message list even if a live Realtime event is dropped (Realtime is
+  // best-effort; clients should re-fetch state).
+  const [activeGroupId, setActiveGroup] = useState(null)
 
   // --- Load the user's groups on mount (Req 11.3) ---
   // The async body defers setState off the synchronous effect body and uses a
@@ -108,6 +113,24 @@ export function useGroups(user) {
     setMessagesByGroup((prev) => ({ ...prev, [groupId]: data ?? [] }))
   }, [])
 
+  // --- Polling fallback for the open thread (Realtime is best-effort) ---
+  // While a thread is open, periodically re-fetch its messages so recipients
+  // converge on the authoritative list even if a live INSERT event is missed.
+  // loadMessages replaces messagesByGroup[groupId] with the full ordered list,
+  // so polling naturally reconciles missed events and de-dupes by replacement.
+  // Skip temp (unsaved) ids — there is nothing to poll for those.
+  useEffect(() => {
+    if (!activeGroupId || activeGroupId.startsWith('temp-')) return undefined
+
+    const interval = setInterval(() => {
+      loadMessages(activeGroupId)
+    }, 4000)
+
+    return () => {
+      clearInterval(interval)
+    }
+  }, [activeGroupId, loadMessages])
+
   // --- Session-long Realtime subscription for ALL of the user's groups ---
   // Mirrors the useClips `clips-live` / useDirectSend `direct-transfers`
   // pattern: one channel established at hook mount for the whole session, with
@@ -124,32 +147,49 @@ export function useGroups(user) {
     if (!user) return undefined
 
     let cancelled = false
+    // Hold the channel in effect scope so the (synchronous) cleanup can remove
+    // it even though it is created inside an async setup function.
+    let channel = null
 
-    const channel = supabase
-      .channel('group-messages-live')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'group_messages',
-        },
-        (payload) => {
-          if (cancelled) return
-          const gid = payload.new.group_id
-          setMessagesByGroup((prev) => {
-            const existing = prev[gid] ?? []
-            // Avoid duplicating a message already present (e.g. optimistic echo).
-            if (existing.some((m) => m.id === payload.new.id)) return prev
-            return { ...prev, [gid]: [...existing, payload.new] }
-          })
-        }
-      )
-      .subscribe()
+    const setup = async () => {
+      // Realtime enforces RLS as the subscribing user; postgres_changes rows
+      // are only delivered when the socket is authenticated with the current
+      // session's access token. Set it BEFORE subscribing so RLS-scoped INSERTs
+      // reach this client (Supabase realtime auth guidance).
+      const { data } = await supabase.auth.getSession()
+      const token = data?.session?.access_token
+      if (token) supabase.realtime.setAuth(token)
+
+      if (cancelled) return
+
+      channel = supabase
+        .channel('group-messages-live')
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'group_messages',
+          },
+          (payload) => {
+            if (cancelled) return
+            const gid = payload.new.group_id
+            setMessagesByGroup((prev) => {
+              const existing = prev[gid] ?? []
+              // Avoid duplicating a message already present (e.g. optimistic echo).
+              if (existing.some((m) => m.id === payload.new.id)) return prev
+              return { ...prev, [gid]: [...existing, payload.new] }
+            })
+          }
+        )
+        .subscribe()
+    }
+
+    setup()
 
     return () => {
       cancelled = true
-      supabase.removeChannel(channel)
+      if (channel) supabase.removeChannel(channel)
     }
   }, [user])
 
@@ -452,15 +492,29 @@ export function useGroups(user) {
     }
 
     // Optimistic echo: the sender sees their own message immediately without
-    // waiting for a realtime round-trip. Dedupe by id so the realtime INSERT
-    // handler does not append a second copy of the same row.
-    if (inserted) {
-      setMessagesByGroup((prev) => {
-        const existing = prev[groupId] ?? []
-        if (existing.some((m) => m.id === inserted.id)) return prev
-        return { ...prev, [groupId]: [...existing, inserted] }
-      })
+    // waiting for a realtime round-trip. Prefer the DB-returned row, but fall
+    // back to a locally-constructed row so the sender ALWAYS sees their message
+    // even if RLS / return-representation yields a null row. Dedupe by id so
+    // the realtime INSERT handler does not append a second copy of the same row;
+    // the next poll's loadMessages replaces the list with the persisted rows.
+    const echo = inserted ?? {
+      id: (globalThis.crypto?.randomUUID?.() ?? `local-${Date.now()}`),
+      group_id: groupId,
+      sender_id: user.id,
+      type,
+      content: content || null,
+      file_url: fileData?.url ?? fileData?.secure_url ?? null,
+      file_name: fileData?.name ?? null,
+      file_size: fileData?.size ?? fileData?.bytes ?? null,
+      mime_type: fileData?.mime ?? fileData?.mime_type ?? null,
+      created_at: new Date().toISOString(),
     }
+
+    setMessagesByGroup((prev) => {
+      const existing = prev[groupId] ?? []
+      if (existing.some((m) => m.id === echo.id)) return prev
+      return { ...prev, [groupId]: [...existing, echo] }
+    })
 
     trackEvent('group_send')
     return { ok: true }
@@ -474,8 +528,17 @@ export function useGroups(user) {
   // GroupThread contract (it calls onSubscribe(groupId) on mount and invokes the
   // returned cleanup on unmount) without tearing down the session-long channel.
   const subscribeGroup = useCallback((groupId) => {
+    // Skip temp (unsaved) ids: there is no persisted history to load/poll.
+    if (!groupId || (typeof groupId === 'string' && groupId.startsWith('temp-'))) {
+      return () => {}
+    }
     loadMessages(groupId)
-    return () => {}
+    // Register this group as the active thread so the polling fallback keeps it
+    // fresh; clear it on unmount so polling stops when the thread closes.
+    setActiveGroup(groupId)
+    return () => {
+      setActiveGroup(null)
+    }
   }, [loadMessages])
 
   return {

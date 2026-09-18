@@ -110,6 +110,12 @@ vi.mock('../lib/supabaseClient', () => ({
     from: (...args) => fromMock(...args),
     channel: (...args) => channelMock(...args),
     removeChannel: (...args) => removeChannelMock(...args),
+    // The session-long realtime effect now authenticates the socket with the
+    // current session token before subscribing (supabase.auth.getSession +
+    // supabase.realtime.setAuth). Provide minimal no-op stubs so the mount
+    // effect runs without throwing; these tests do not assert on realtime auth.
+    auth: { getSession: async () => ({ data: { session: { access_token: 'test-token' } } }) },
+    realtime: { setAuth: () => {} },
   },
 }))
 
