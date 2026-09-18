@@ -17,7 +17,7 @@ import { renderHook, act, waitFor } from '@testing-library/react'
 // vi.mock is hoisted above top-level declarations, so the mock plumbing is
 // created via vi.hoisted() to be reachable both inside the factory and in the
 // test bodies.
-const { state, fromMock, toast, trackEvent } = vi.hoisted(() => {
+const { state, fromMock, channelMock, removeChannelMock, toast, trackEvent } = vi.hoisted(() => {
   // `state` holds the resolved values the fake query builder should return,
   // keyed by table (and by whether the select was a count/head query). Tests
   // mutate this before invoking the hook methods.
@@ -55,6 +55,14 @@ const { state, fromMock, toast, trackEvent } = vi.hoisted(() => {
       eq() { return builder },
       is() { return builder },
       in() { return builder },
+      order() { return builder },
+      // sendToGroup now reads the inserted row back via .insert(..).select().single().
+      // Resolve to the configured insert result so the { data, error } shape the
+      // hook destructures matches: on success `data` is the echoed row, on
+      // failure `data` is null and `error` is set.
+      single() {
+        return Promise.resolve(state.insert)
+      },
       // Thenable: resolve based on what was requested.
       then(resolve, reject) {
         let value
@@ -75,12 +83,33 @@ const { state, fromMock, toast, trackEvent } = vi.hoisted(() => {
 
   const fromMock = vi.fn((table) => makeBuilder(table))
 
-  return { state, fromMock, toast: vi.fn(), trackEvent: vi.fn() }
+  // The hook now opens a session-long Realtime channel at mount (mirroring
+  // useClips). Provide a no-op channel builder + removeChannel so the mount
+  // effect runs without error; these tests do not assert on realtime.
+  const channelMock = vi.fn(() => {
+    const ch = {
+      on: () => ch,
+      subscribe: () => ch,
+    }
+    return ch
+  })
+  const removeChannelMock = vi.fn()
+
+  return {
+    state,
+    fromMock,
+    channelMock,
+    removeChannelMock,
+    toast: vi.fn(),
+    trackEvent: vi.fn(),
+  }
 })
 
 vi.mock('../lib/supabaseClient', () => ({
   supabase: {
     from: (...args) => fromMock(...args),
+    channel: (...args) => channelMock(...args),
+    removeChannel: (...args) => removeChannelMock(...args),
   },
 }))
 

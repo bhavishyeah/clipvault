@@ -87,6 +87,72 @@ export function useGroups(user) {
     }
   }, [user])
 
+  // --- Load a group's existing messages (history) (Req 14.2, 14.3) ---
+  // The live subscription (below) only delivers rows inserted AFTER it is
+  // established; opening a thread must show what already exists. Callers invoke
+  // this when a thread opens. Errors leave the cached messages untouched.
+  const loadMessages = useCallback(async (groupId) => {
+    if (!groupId) return
+
+    const { data, error } = await supabase
+      .from('group_messages')
+      .select('*')
+      .eq('group_id', groupId)
+      .order('created_at', { ascending: true })
+
+    if (error) {
+      console.error('Could not load group messages:', error.message)
+      return
+    }
+
+    setMessagesByGroup((prev) => ({ ...prev, [groupId]: data ?? [] }))
+  }, [])
+
+  // --- Session-long Realtime subscription for ALL of the user's groups ---
+  // Mirrors the useClips `clips-live` / useDirectSend `direct-transfers`
+  // pattern: one channel established at hook mount for the whole session, with
+  // a cancelled guard and removeChannel cleanup. This is the fan-out mechanism
+  // (design: "single Group_Message row + subscription fan-out") — a member
+  // receives a group's messages regardless of which thread (if any) is open.
+  //
+  // A client-side postgres_changes filter can only scope a single group_id, but
+  // a user may belong to many groups, so we subscribe WITHOUT a group_id filter.
+  // RLS on group_messages already restricts delivered rows to groups the caller
+  // is a member of, so no cross-group leakage occurs. The handler routes each
+  // row into messagesByGroup[payload.new.group_id], deduping by message id.
+  useEffect(() => {
+    if (!user) return undefined
+
+    let cancelled = false
+
+    const channel = supabase
+      .channel('group-messages-live')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'group_messages',
+        },
+        (payload) => {
+          if (cancelled) return
+          const gid = payload.new.group_id
+          setMessagesByGroup((prev) => {
+            const existing = prev[gid] ?? []
+            // Avoid duplicating a message already present (e.g. optimistic echo).
+            if (existing.some((m) => m.id === payload.new.id)) return prev
+            return { ...prev, [gid]: [...existing, payload.new] }
+          })
+        }
+      )
+      .subscribe()
+
+    return () => {
+      cancelled = true
+      supabase.removeChannel(channel)
+    }
+  }, [user])
+
   // --- Create a group + owner membership, optimistic with rollback (Req 11.1, 11.2) ---
   const createGroup = useCallback(async (name) => {
     if (!user) return null
@@ -360,17 +426,23 @@ export function useGroups(user) {
     }
 
     // Insert exactly one group_messages row (Req 14.1). RLS "members send
-    // messages" rejects non-members (Req 14.4).
-    const { error } = await supabase.from('group_messages').insert({
-      group_id: groupId,
-      sender_id: user.id,
-      type,
-      content: content || null,
-      file_url: fileData?.url ?? fileData?.secure_url ?? null,
-      file_name: fileData?.name ?? null,
-      file_size: fileData?.size ?? fileData?.bytes ?? null,
-      mime_type: fileData?.mime ?? fileData?.mime_type ?? null,
-    })
+    // messages" rejects non-members (Req 14.4). Select the inserted row back so
+    // we can echo it optimistically into the thread — the session-long realtime
+    // handler dedupes by id, so this never double-appends.
+    const { data: inserted, error } = await supabase
+      .from('group_messages')
+      .insert({
+        group_id: groupId,
+        sender_id: user.id,
+        type,
+        content: content || null,
+        file_url: fileData?.url ?? fileData?.secure_url ?? null,
+        file_name: fileData?.name ?? null,
+        file_size: fileData?.size ?? fileData?.bytes ?? null,
+        mime_type: fileData?.mime ?? fileData?.mime_type ?? null,
+      })
+      .select()
+      .single()
 
     if (error) {
       // Retain composed content (Req 14.6); do not clear the input.
@@ -379,36 +451,32 @@ export function useGroups(user) {
       return { ok: false, error: error.message }
     }
 
+    // Optimistic echo: the sender sees their own message immediately without
+    // waiting for a realtime round-trip. Dedupe by id so the realtime INSERT
+    // handler does not append a second copy of the same row.
+    if (inserted) {
+      setMessagesByGroup((prev) => {
+        const existing = prev[groupId] ?? []
+        if (existing.some((m) => m.id === inserted.id)) return prev
+        return { ...prev, [groupId]: [...existing, inserted] }
+      })
+    }
+
     trackEvent('group_send')
     return { ok: true }
   }, [user])
 
-  // --- Subscribe to a group's messages via Realtime (Req 14.2) ---
-  // Returns an unsubscribe cleanup the caller invokes on unmount.
+  // --- Open a group's thread: load its message history (Req 14.2) ---
+  // Live INSERTs are already delivered by the session-long channel above (which
+  // stays subscribed for the whole session regardless of which thread is open),
+  // so this no longer opens a per-group channel. It simply fetches the existing
+  // messages when a thread mounts and returns a no-op cleanup, preserving the
+  // GroupThread contract (it calls onSubscribe(groupId) on mount and invokes the
+  // returned cleanup on unmount) without tearing down the session-long channel.
   const subscribeGroup = useCallback((groupId) => {
-    const channel = supabase
-      .channel(`group-${groupId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'group_messages',
-          filter: `group_id=eq.${groupId}`,
-        },
-        (payload) => {
-          setMessagesByGroup((prev) => {
-            const existing = prev[groupId] ?? []
-            // Avoid duplicating a message already present.
-            if (existing.some((m) => m.id === payload.new.id)) return prev
-            return { ...prev, [groupId]: [...existing, payload.new] }
-          })
-        }
-      )
-      .subscribe()
-
-    return () => { supabase.removeChannel(channel) }
-  }, [])
+    loadMessages(groupId)
+    return () => {}
+  }, [loadMessages])
 
   return {
     groups,
@@ -422,5 +490,6 @@ export function useGroups(user) {
     members,
     sendToGroup,
     subscribeGroup,
+    loadMessages,
   }
 }
