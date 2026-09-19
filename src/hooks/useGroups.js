@@ -2,22 +2,24 @@ import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { toast } from '../components/ui/toastStore'
 import { trackEvent } from '../lib/analytics'
-import { validateGroupName, canSendToGroup } from '../lib/group'
+import { validateGroupName } from '../lib/group'
 import { validateFile, SIZE_LIMITS } from '../lib/fileType'
 
-// VOLT — Groups hook (Feature 3: group sharing)
+// VOLT — Groups hook (send-only distribution lists)
 //
-// Manages the groups the current user belongs to, their membership, and their
-// messages. Follows the same conventions as useClips / useDirectSend:
-// optimistic insert with rollback, Supabase Realtime postgres_changes channels,
-// toast notifications, and trackEvent analytics. Pure gates (name validation,
-// send-permission by member count, file size) live in src/lib/group.js and
-// src/lib/fileType.js; this hook performs the side-effecting Supabase calls and
-// holds the group/message state.
+// A group is simply a named set of members. There is NO chat, NO threads, NO
+// realtime, and NO message history. Sending to a group fans the item out to
+// each OTHER member's Incoming inbox by inserting one direct_transfers row per
+// recipient (tagged with the group name), then the caller shows a single
+// confirmation toast.
 //
-// Row Level Security enforces the authoritative rules — non-owners cannot
-// delete a group, non-members cannot read or send messages. The hook applies
-// the same rules optimistically for UX and rolls back when RLS rejects.
+// The hook manages the groups the current user belongs to plus their
+// membership (create / delete / add / remove / leave / members) and performs
+// the fan-out send. Pure gates (name validation, file size) live in
+// src/lib/group.js and src/lib/fileType.js. Row Level Security enforces the
+// authoritative rules — non-owners cannot delete a group, and the
+// direct_transfers insert policy (WITH CHECK auth.uid() = sender_id) allows the
+// sender to insert the multi-row fan-out.
 
 // Is a Supabase error a unique-constraint (duplicate PK) violation? Postgres
 // reports code 23505; the message also mentions "duplicate".
@@ -28,13 +30,7 @@ function isUniqueViolation(error) {
 
 export function useGroups(user) {
   const [groups, setGroups] = useState([])
-  const [messagesByGroup, setMessagesByGroup] = useState({})
   const [loading, setLoading] = useState(true)
-  // The group whose thread is currently open. While set (and pointing at a
-  // real, persisted id) it is polled so recipients still converge on the full
-  // message list even if a live Realtime event is dropped (Realtime is
-  // best-effort; clients should re-fetch state).
-  const [activeGroupId, setActiveGroup] = useState(null)
 
   // --- Load the user's groups on mount (Req 11.3) ---
   // The async body defers setState off the synchronous effect body and uses a
@@ -89,107 +85,6 @@ export function useGroups(user) {
 
     return () => {
       cancelled = true
-    }
-  }, [user])
-
-  // --- Load a group's existing messages (history) (Req 14.2, 14.3) ---
-  // The live subscription (below) only delivers rows inserted AFTER it is
-  // established; opening a thread must show what already exists. Callers invoke
-  // this when a thread opens. Errors leave the cached messages untouched.
-  const loadMessages = useCallback(async (groupId) => {
-    if (!groupId) return
-
-    const { data, error } = await supabase
-      .from('group_messages')
-      .select('*')
-      .eq('group_id', groupId)
-      .order('created_at', { ascending: true })
-
-    if (error) {
-      console.error('Could not load group messages:', error.message)
-      return
-    }
-
-    setMessagesByGroup((prev) => ({ ...prev, [groupId]: data ?? [] }))
-  }, [])
-
-  // --- Polling fallback for the open thread (Realtime is best-effort) ---
-  // While a thread is open, periodically re-fetch its messages so recipients
-  // converge on the authoritative list even if a live INSERT event is missed.
-  // loadMessages replaces messagesByGroup[groupId] with the full ordered list,
-  // so polling naturally reconciles missed events and de-dupes by replacement.
-  // Skip temp (unsaved) ids — there is nothing to poll for those.
-  useEffect(() => {
-    if (!activeGroupId || activeGroupId.startsWith('temp-')) return undefined
-
-    const interval = setInterval(() => {
-      loadMessages(activeGroupId)
-    }, 4000)
-
-    return () => {
-      clearInterval(interval)
-    }
-  }, [activeGroupId, loadMessages])
-
-  // --- Session-long Realtime subscription for ALL of the user's groups ---
-  // Mirrors the useClips `clips-live` / useDirectSend `direct-transfers`
-  // pattern: one channel established at hook mount for the whole session, with
-  // a cancelled guard and removeChannel cleanup. This is the fan-out mechanism
-  // (design: "single Group_Message row + subscription fan-out") — a member
-  // receives a group's messages regardless of which thread (if any) is open.
-  //
-  // A client-side postgres_changes filter can only scope a single group_id, but
-  // a user may belong to many groups, so we subscribe WITHOUT a group_id filter.
-  // RLS on group_messages already restricts delivered rows to groups the caller
-  // is a member of, so no cross-group leakage occurs. The handler routes each
-  // row into messagesByGroup[payload.new.group_id], deduping by message id.
-  useEffect(() => {
-    if (!user) return undefined
-
-    let cancelled = false
-    // Hold the channel in effect scope so the (synchronous) cleanup can remove
-    // it even though it is created inside an async setup function.
-    let channel = null
-
-    const setup = async () => {
-      // Realtime enforces RLS as the subscribing user; postgres_changes rows
-      // are only delivered when the socket is authenticated with the current
-      // session's access token. Set it BEFORE subscribing so RLS-scoped INSERTs
-      // reach this client (Supabase realtime auth guidance).
-      const { data } = await supabase.auth.getSession()
-      const token = data?.session?.access_token
-      if (token) supabase.realtime.setAuth(token)
-
-      if (cancelled) return
-
-      channel = supabase
-        .channel('group-messages-live')
-        .on(
-          'postgres_changes',
-          {
-            event: 'INSERT',
-            schema: 'public',
-            table: 'group_messages',
-          },
-          (payload) => {
-            if (cancelled) return
-            const gid = payload.new.group_id
-            setMessagesByGroup((prev) => {
-              const existing = prev[gid] ?? []
-              // Avoid duplicating a message already present (e.g. optimistic echo).
-              if (existing.some((m) => m.id === payload.new.id)) return prev
-              return { ...prev, [gid]: [...existing, payload.new] }
-            })
-          }
-        )
-        .subscribe()
-    }
-
-    setup()
-
-    return () => {
-      cancelled = true
-      if (channel) supabase.removeChannel(channel)
     }
   }, [user])
 
@@ -290,13 +185,6 @@ export function useGroups(user) {
       return
     }
 
-    // Drop cached messages for the removed group.
-    setMessagesByGroup((prev) => {
-      if (!(groupId in prev)) return prev
-      const next = { ...prev }
-      delete next[groupId]
-      return next
-    })
     toast('Group deleted')
     trackEvent('group_delete')
   }, [groups])
@@ -385,12 +273,6 @@ export function useGroups(user) {
       return false
     }
 
-    setMessagesByGroup((prev) => {
-      if (!(groupId in prev)) return prev
-      const next = { ...prev }
-      delete next[groupId]
-      return next
-    })
     toast('You left the group')
     trackEvent('group_leave')
     return true
@@ -430,26 +312,47 @@ export function useGroups(user) {
     }))
   }, [])
 
-  // --- Send one message to a group (Req 14.1, 14.4, 14.5, 14.6) ---
-  // Returns { ok: true } on success, or { ok: false, error } on failure so the
-  // caller can retain the composed content (Req 14.6).
-  const sendToGroup = useCallback(async (groupId, type, content, fileData) => {
+  // --- Send one item to a group by fanning it out to each member's Incoming ---
+  // A group is a distribution list: sending inserts ONE direct_transfers row per
+  // OTHER member (the sender is excluded), all tagged with `group.name` so the
+  // recipient's Incoming card can show which group it came from. The file (if
+  // any) was uploaded once by the caller, so every row shares the same file_url
+  // — no re-upload. All rows are inserted in a single round-trip; the
+  // direct_transfers insert policy (WITH CHECK auth.uid() = sender_id) permits
+  // the multi-row insert since the sender owns every row.
+  //
+  // `group` is the full group object ({ id, name, ... }) so we have group.name
+  // for the tag. Returns { ok: true, count } on success or { ok: false, error }
+  // on failure so the caller can retain the composed content.
+  const sendToGroup = useCallback(async (group, type, content, fileData) => {
     if (!user) return { ok: false, error: 'Not signed in' }
+    if (!group?.id) return { ok: false, error: 'no_group' }
 
-    // Block sends to a group with no members to receive them (Req 13.5).
-    const { count: memberCount } = await supabase
+    // Load the group's members and exclude the current user — a send only goes
+    // to OTHER people. A group with no other members has nobody to receive it.
+    const { data: memberRows, error: memberErr } = await supabase
       .from('group_members')
-      .select('user_id', { count: 'exact', head: true })
-      .eq('group_id', groupId)
+      .select('user_id')
+      .eq('group_id', group.id)
 
-    if (!canSendToGroup(memberCount ?? 0)) {
-      toast('This group has no members to receive the item', 'error')
+    if (memberErr) {
+      toast('Send did not complete', 'error')
+      console.error('Could not load group members for send:', memberErr.message)
+      return { ok: false, error: memberErr.message }
+    }
+
+    const recipientIds = (memberRows ?? [])
+      .map((r) => r.user_id)
+      .filter((id) => id !== user.id)
+
+    if (recipientIds.length === 0) {
+      toast('This group has no other members to send to', 'error')
       return { ok: false, error: 'no_members' }
     }
 
-    // Size gate for file/audio before any store (Req 14.5). The uploaded
-    // fileData is produced by uploadFile; re-check the reported size here so a
-    // send never stores a row for an oversize asset.
+    // Size gate for file/audio before any store. The uploaded fileData is
+    // produced by uploadFile; re-check the reported size here so a send never
+    // stores rows for an oversize asset.
     if (type === 'file' || type === 'audio') {
       const size = fileData?.size ?? fileData?.bytes
       const mime = fileData?.mime ?? fileData?.mime_type
@@ -465,85 +368,36 @@ export function useGroups(user) {
       }
     }
 
-    // Insert exactly one group_messages row (Req 14.1). RLS "members send
-    // messages" rejects non-members (Req 14.4). Select the inserted row back so
-    // we can echo it optimistically into the thread — the session-long realtime
-    // handler dedupes by id, so this never double-appends.
-    const { data: inserted, error } = await supabase
-      .from('group_messages')
-      .insert({
-        group_id: groupId,
-        sender_id: user.id,
-        type,
-        content: content || null,
-        file_url: fileData?.url ?? fileData?.secure_url ?? null,
-        file_name: fileData?.name ?? null,
-        file_size: fileData?.size ?? fileData?.bytes ?? null,
-        mime_type: fileData?.mime ?? fileData?.mime_type ?? null,
-      })
-      .select()
-      .single()
+    // One row template fanned out across every recipient. All rows share the
+    // same file fields (single prior upload) and the group_name tag.
+    const rows = recipientIds.map((recipientId) => ({
+      sender_id: user.id,
+      recipient_id: recipientId,
+      type,
+      content: content || null,
+      file_url: fileData?.secure_url ?? fileData?.url ?? null,
+      file_name: fileData?.name ?? null,
+      file_size: fileData?.bytes ?? fileData?.size ?? null,
+      mime_type: fileData?.mime ?? fileData?.mime_type ?? null,
+      status: 'pending',
+      group_name: group.name,
+    }))
+
+    const { error } = await supabase.from('direct_transfers').insert(rows)
 
     if (error) {
-      // Retain composed content (Req 14.6); do not clear the input.
       toast('Send did not complete', 'error')
       console.error('Could not send to group:', error.message)
       return { ok: false, error: error.message }
     }
 
-    // Optimistic echo: the sender sees their own message immediately without
-    // waiting for a realtime round-trip. Prefer the DB-returned row, but fall
-    // back to a locally-constructed row so the sender ALWAYS sees their message
-    // even if RLS / return-representation yields a null row. Dedupe by id so
-    // the realtime INSERT handler does not append a second copy of the same row;
-    // the next poll's loadMessages replaces the list with the persisted rows.
-    const echo = inserted ?? {
-      id: (globalThis.crypto?.randomUUID?.() ?? `local-${Date.now()}`),
-      group_id: groupId,
-      sender_id: user.id,
-      type,
-      content: content || null,
-      file_url: fileData?.url ?? fileData?.secure_url ?? null,
-      file_name: fileData?.name ?? null,
-      file_size: fileData?.size ?? fileData?.bytes ?? null,
-      mime_type: fileData?.mime ?? fileData?.mime_type ?? null,
-      created_at: new Date().toISOString(),
-    }
-
-    setMessagesByGroup((prev) => {
-      const existing = prev[groupId] ?? []
-      if (existing.some((m) => m.id === echo.id)) return prev
-      return { ...prev, [groupId]: [...existing, echo] }
-    })
-
+    toast(`Sent successfully to all ${rows.length} member${rows.length === 1 ? '' : 's'}`)
     trackEvent('group_send')
-    return { ok: true }
+    return { ok: true, count: rows.length }
   }, [user])
-
-  // --- Open a group's thread: load its message history (Req 14.2) ---
-  // Live INSERTs are already delivered by the session-long channel above (which
-  // stays subscribed for the whole session regardless of which thread is open),
-  // so this no longer opens a per-group channel. It simply fetches the existing
-  // messages when a thread mounts and returns a no-op cleanup, preserving the
-  // GroupThread contract (it calls onSubscribe(groupId) on mount and invokes the
-  // returned cleanup on unmount) without tearing down the session-long channel.
-  const subscribeGroup = useCallback((groupId) => {
-    // Skip temp (unsaved) ids: there is no persisted history to load/poll.
-    if (!groupId || (typeof groupId === 'string' && groupId.startsWith('temp-'))) {
-      return () => {}
-    }
-    loadMessages(groupId)
-    // Register this group as the active thread so the polling fallback keeps it
-    // fresh; clear it on unmount so polling stops when the thread closes.
-    setActiveGroup(groupId)
-    return () => {
-      setActiveGroup(null)
-    }
-  }, [loadMessages])
 
   return {
     groups,
-    messagesByGroup,
     loading,
     createGroup,
     deleteGroup,
@@ -552,7 +406,5 @@ export function useGroups(user) {
     leaveGroup,
     members,
     sendToGroup,
-    subscribeGroup,
-    loadMessages,
   }
 }
