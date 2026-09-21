@@ -43,7 +43,9 @@ export default defineConfig({
         ],
 
         share_target: {
-          action: '/',
+          // Use '/?share=1' instead of '/' so Android doesn't confuse the
+          // file-picker focus-return with a share target activation.
+          action: '/?share=1',
           method: 'GET',
           enctype: 'application/x-www-form-urlencoded',
           params: {
@@ -57,6 +59,11 @@ export default defineConfig({
       workbox: {
         cleanupOutdatedCaches: true,
         navigateFallback: '/index.html',
+        // Restrict navigateFallback to actual app routes only. Without this,
+        // Workbox intercepts the file-picker focus-return on Android Chrome PWA
+        // as a navigation event and resets the page to index.html.
+        navigateFallbackAllowlist: [/^\/$/, /^\/index\.html(\?.*)?$/],
+        navigateFallbackDenylist: [/^\/api\//, /^\/__/, /cloudinary/],
         skipWaiting: true,
         clientsClaim: true,
 

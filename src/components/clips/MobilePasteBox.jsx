@@ -1,9 +1,10 @@
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import { IconUpload, IconClipboard } from '../ui/Icons'
+
+const MOBILE_INPUT_ID = 'mobile-file-upload'
 
 export default function MobilePasteBox({ onSave, onImage, saving }) {
   const [text, setText] = useState('')
-  const fileRef = useRef(null)
 
   const handleSubmit = async (event) => {
     event.preventDefault()
@@ -45,15 +46,19 @@ export default function MobilePasteBox({ onSave, onImage, saving }) {
       <div className="mobile-paste-footer">
         <span>{text.length}/10000</span>
         <div className="mobile-paste-actions">
-          <button
-            type="button"
+          {/* Use a <label> linked to the file input via htmlFor instead of a
+              button with onClick(.click()). This avoids the Android PWA bug
+              where programmatic .click() triggers a navigation/popstate event
+              that the Service Worker intercepts, resetting the page. */}
+          <label
+            htmlFor={MOBILE_INPUT_ID}
             className="mobile-image-btn"
-            onClick={() => fileRef.current?.click()}
-            disabled={saving}
             title="Upload file"
+            aria-disabled={saving}
+            style={{ cursor: saving ? 'not-allowed' : 'pointer', pointerEvents: saving ? 'none' : 'auto' }}
           >
             <IconUpload />
-          </button>
+          </label>
           <button type="submit" disabled={!text.trim() || saving}>
             {saving ? 'Saving…' : 'Save text'}
           </button>
@@ -61,10 +66,11 @@ export default function MobilePasteBox({ onSave, onImage, saving }) {
       </div>
 
       <input
-        ref={fileRef}
+        id={MOBILE_INPUT_ID}
         type="file"
         accept="image/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip"
         onChange={handleImagePick}
+        disabled={saving}
         hidden
         aria-hidden="true"
       />

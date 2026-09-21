@@ -1,63 +1,57 @@
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import { toast } from '../ui/toastStore'
 import { IconUpload } from '../ui/Icons'
 
 const MAX_SIZE = 15 * 1024 * 1024 // 15MB
+const INPUT_ID = 'vault-file-upload'
 
 export default function ImageUpload({ onImage, saving }) {
-  const inputRef = useRef(null)
   const [dragOver, setDragOver] = useState(false)
 
-  const validateAndUpload = (file) => {
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0]
+    // Reset input so the same file can be re-selected
+    e.target.value = ''
     if (!file) return
-
     if (file.size > MAX_SIZE) {
       toast('File must be under 15MB', 'error')
       return
     }
-
     onImage(file)
-  }
-
-  const handleFileChange = (e) => {
-    const file = e.target.files?.[0]
-    validateAndUpload(file)
-    // Reset so the same file can be selected again
-    e.target.value = ''
   }
 
   const handleDrop = (e) => {
     e.preventDefault()
     setDragOver(false)
-
     const file = e.dataTransfer.files?.[0]
-    validateAndUpload(file)
+    if (!file) return
+    if (file.size > MAX_SIZE) {
+      toast('File must be under 15MB', 'error')
+      return
+    }
+    onImage(file)
   }
-
-  const handleDragOver = (e) => {
-    e.preventDefault()
-    setDragOver(true)
-  }
-
-  const handleDragLeave = () => setDragOver(false)
 
   return (
-    <div
+    <label
+      htmlFor={INPUT_ID}
       className={`image-upload-zone ${dragOver ? 'drag-over' : ''}`}
       onDrop={handleDrop}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onClick={() => inputRef.current?.click()}
-      role="button"
-      tabIndex={0}
+      onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+      onDragLeave={() => setDragOver(false)}
       aria-label="Upload a file"
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') inputRef.current?.click() }}
+      style={{ cursor: saving ? 'not-allowed' : 'pointer' }}
     >
+      {/* Native file input — linked via label htmlFor so the browser opens the
+          picker without a JS .click() call, avoiding the Android PWA reload bug
+          where programmatic .click() triggers a popstate/navigation event that
+          the Service Worker intercepts and resets the page. */}
       <input
-        ref={inputRef}
+        id={INPUT_ID}
         type="file"
         accept="image/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip"
         onChange={handleFileChange}
+        disabled={saving}
         hidden
         aria-hidden="true"
       />
@@ -73,6 +67,6 @@ export default function ImageUpload({ onImage, saving }) {
           </p>
         </div>
       </div>
-    </div>
+    </label>
   )
 }
