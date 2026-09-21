@@ -541,6 +541,8 @@
 .toolbar-controls {
   display: flex;
   align-items: center;
+  flex: 1;
+  justify-content: center;
   gap: 8px;
 }
 
@@ -1444,31 +1446,6 @@
 }
 
 /* ==========================================================================
-   Send To Button
-   ========================================================================== */
-
-.send-to-button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  padding: 12px;
-  margin-bottom: 24px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  color: var(--text);
-  font-size: 14px;
-  font-weight: 500;
-  transition: all .15s;
-}
-
-.send-to-button:hover {
-  border-color: var(--border-hover);
-  background: var(--surface-2);
-}
-
-/* ==========================================================================
    Send Composer
    ========================================================================== */
 
@@ -2155,12 +2132,13 @@
 
 .share-actions {
   display: flex;
-  flex-wrap: wrap;
   gap: 10px;
-  align-items: center;
+  margin-bottom: 24px;
+  align-items: stretch;
 }
 
 .share-panel-button {
+  flex: 1;
   padding: 10px 16px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);

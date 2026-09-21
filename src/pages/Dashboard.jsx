@@ -128,7 +128,7 @@ function DesktopPasteInput({ onSave, saving, clips }) {
 export default function Dashboard({ user, profile }) {
   const {
     clips, loading, saving, uploadProgress,
-    saveText, saveImage, removeClip, togglePin, editClip, setExpiration, reorderPins,
+    saveText, saveFile, saveImage, removeClip, togglePin, editClip, setExpiration, reorderPins,
   } = useClips(user)
 
   const { theme, toggleTheme } = useTheme()
@@ -568,17 +568,14 @@ export default function Dashboard({ user, profile }) {
           <div className="welcome-left">
             <p className="eyebrow">Your vault</p>
             <h1>Everything you copy,<br /><span>within reach.</span></h1>
-            <p className="welcome-copy">Save text, links and images. Access them from any device, anytime.</p>
-            <div className="welcome-meta">
-              <span className="clip-count-inline"><strong>{clips.length}</strong> clips</span>
-            </div>
+            <p className="welcome-copy">Save text, links, images, audio and files. Access them from any device, anytime.</p>
           </div>
 
           <div className="welcome-right">
             <div className="desktop-paste-box">
               <DesktopPasteInput onSave={saveText} saving={saving} clips={clips} />
             </div>
-            <ImageUpload onImage={saveImage} saving={saving} />
+            <ImageUpload onImage={saveFile} saving={saving} />
           </div>
         </section>
 
@@ -588,7 +585,7 @@ export default function Dashboard({ user, profile }) {
         {/* Send To + Sharing buttons */}
         {!isAnonymous && (
           <div className="share-actions">
-            <button className="send-to-button" onClick={() => setShowSendComposer(true)}>
+            <button className="share-panel-button" onClick={() => setShowSendComposer(true)}>
               Send to @user
             </button>
             <button className="share-panel-button" onClick={() => setShowGroupSend(true)}>
@@ -615,7 +612,7 @@ export default function Dashboard({ user, profile }) {
               <input ref={searchInputRef} value={query} onChange={handleSearchChange} placeholder="Search... (Ctrl+K)" />
             </label>
             <div className="filter-tabs">
-              {['all', 'text', 'link', 'image'].map((type) => (
+              {['all', 'text', 'link', 'image', 'file', 'audio'].map((type) => (
                 <button key={type} className={filter === type ? 'active' : ''} onClick={() => setFilter(type)}>
                   {type === 'all' ? 'All' : type}
                 </button>
@@ -676,7 +673,7 @@ export default function Dashboard({ user, profile }) {
                       <button onClick={() => copyClip(clip)} title="Copy"><IconCopy /></button>
                       {clip.type !== 'image' && <button onClick={() => handleEditClick(clip)} title="Edit"><IconEdit /></button>}
                       {clip.type === 'link' && <button onClick={() => openLink(clip.content)} title="Open"><IconExternalLink /></button>}
-                      {clip.type === 'image' && <button onClick={() => downloadClip(clip)} title="Download"><IconDownload /></button>}
+                      {(clip.type === 'image' || clip.type === 'file' || clip.type === 'audio') && <button onClick={() => downloadClip(clip)} title="Download"><IconDownload /></button>}
                       <button className="expiry-action" onClick={() => handleSetExpiry(clip, clip.expires_at ? null : 7)} title={clip.expires_at ? 'Remove expiry' : 'Expire in 7d'}>
                         {clip.expires_at ? <IconInfinity /> : <IconClock />}
                       </button>

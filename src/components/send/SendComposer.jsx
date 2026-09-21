@@ -145,11 +145,11 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
             />
           )}
           {!attachment && (
-            <button className="send-attach" onClick={() => fileRef.current?.click()}>
+            <button className="send-attach" onClick={(e) => { e.stopPropagation(); fileRef.current?.click() }}>
               <IconUpload width="14" height="14" /> Attach
             </button>
           )}
-          <input ref={fileRef} type="file" accept={ACCEPT} onChange={handleFilePick} hidden />
+          <input ref={fileRef} type="file" accept={ACCEPT} onChange={handleFilePick} hidden onClick={(e) => e.stopPropagation()} />
         </div>
 
         {/* Contacts (quick pick) */}

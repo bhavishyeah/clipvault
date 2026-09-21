@@ -1,9 +1,5 @@
 import { useRef, useState } from 'react'
-import { toast } from '../ui/toastStore'
-import { IconCamera, IconClipboard } from '../ui/Icons'
-
-const ACCEPTED_TYPES = ['image/jpeg', 'image/jpg', 'image/png']
-const MAX_SIZE = 10 * 1024 * 1024 // 10MB
+import { IconUpload, IconClipboard } from '../ui/Icons'
 
 export default function MobilePasteBox({ onSave, onImage, saving }) {
   const [text, setText] = useState('')
@@ -21,22 +17,9 @@ export default function MobilePasteBox({ onSave, onImage, saving }) {
 
   const handleImagePick = (e) => {
     const file = e.target.files?.[0]
-    if (!file) return
-
-    if (!ACCEPTED_TYPES.includes(file.type)) {
-      toast('Only JPG and PNG images are supported', 'error')
-      e.target.value = ''
-      return
-    }
-
-    if (file.size > MAX_SIZE) {
-      toast('Image must be under 10MB', 'error')
-      e.target.value = ''
-      return
-    }
-
-    onImage(file)
     e.target.value = ''
+    if (!file) return
+    onImage(file)
   }
 
   return (
@@ -67,9 +50,9 @@ export default function MobilePasteBox({ onSave, onImage, saving }) {
             className="mobile-image-btn"
             onClick={() => fileRef.current?.click()}
             disabled={saving}
-            title="Upload image"
+            title="Upload file"
           >
-            <IconCamera />
+            <IconUpload />
           </button>
           <button type="submit" disabled={!text.trim() || saving}>
             {saving ? 'Saving…' : 'Save text'}
@@ -80,7 +63,7 @@ export default function MobilePasteBox({ onSave, onImage, saving }) {
       <input
         ref={fileRef}
         type="file"
-        accept=".jpg,.jpeg,.png"
+        accept="image/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip"
         onChange={handleImagePick}
         hidden
         aria-hidden="true"
