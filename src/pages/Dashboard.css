@@ -2551,10 +2551,23 @@
 .security-danger:disabled { opacity: .5; cursor: not-allowed; }
 
 .send-file-preview {
+  position: relative;          /* keeps .send-remove-image contained */
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  background: var(--bg);
+}
+
+.send-file-preview .file-card {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  padding: 0;
+  background: transparent;
 }
 
 /* ==========================================================================
