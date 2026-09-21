@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { IconUpload } from '../ui/Icons'
 import { toast } from '../ui/toastStore'
 import FileCard from '../ui/FileCard'
@@ -32,6 +32,7 @@ const isUrl = (text) => /^(https?:\/\/)?[\w.-]+\.[a-z]{2,}([/?#].*)?$/i.test(tex
 // Broadened picker scope: images, audio, and common document types. Selections
 // are still gated by `validateFile` in the pick handler.
 const ACCEPT = 'image/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip'
+const GROUP_FILE_INPUT_ID = 'group-send-file-input'
 
 export default function GroupSendPanel({
   onClose,
@@ -46,7 +47,13 @@ export default function GroupSendPanel({
   const [content, setContent] = useState('')
   const [attachment, setAttachment] = useState(null)
   const [sending, setSending] = useState(false)
-  const fileRef = useRef(null)
+
+  // Close on Escape — safe on all platforms
+  useEffect(() => {
+    const handleKey = (e) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [onClose])
 
   // Resolve a group's member count from the injected map (preferred) or the
   // group object's own memberCount; undefined when unknown so we can omit it.
@@ -132,13 +139,16 @@ export default function GroupSendPanel({
   }
 
   return (
-    <div className="confirm-overlay" onClick={onClose}>
+    // Overlay click-to-close removed — on Android Chrome, the native file
+    // picker bottom sheet fires a synthetic click on the document when it
+    // closes, which hits the overlay and dismisses the modal before the file
+    // is processed. Close is handled by the × button and Escape only.
+    <div className="confirm-overlay">
       <div
         className="send-composer"
         role="dialog"
         aria-modal="true"
         aria-labelledby="group-send-title"
-        onClick={(e) => e.stopPropagation()}
       >
         {!selectedGroup ? (
           // STEP 1 — pick a group
@@ -237,11 +247,11 @@ export default function GroupSendPanel({
                 />
               )}
               {!attachment && (
-                <button className="send-attach" onClick={() => fileRef.current?.click()}>
+                <label htmlFor={GROUP_FILE_INPUT_ID} className="send-attach" style={{ cursor: 'pointer' }}>
                   <IconUpload width="14" height="14" /> Attach
-                </button>
+                </label>
               )}
-              <input ref={fileRef} type="file" accept={ACCEPT} onChange={handleFilePick} hidden />
+              <input id={GROUP_FILE_INPUT_ID} type="file" accept={ACCEPT} onChange={handleFilePick} hidden aria-hidden="true" />
             </div>
 
             <button

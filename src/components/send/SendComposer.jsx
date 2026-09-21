@@ -1,9 +1,13 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { IconSearch, IconUpload } from '../ui/Icons'
 import { toast } from '../ui/toastStore'
 import FileCard from '../ui/FileCard'
 import { uploadFile, SizeError } from '../../lib/uploadFile'
 import { classifyFile, validateFile, humanSize } from '../../lib/fileType'
+
+// Unique id for the hidden file input — avoids collisions if composer is
+// ever rendered more than once.
+const FILE_INPUT_ID = 'send-composer-file-input'
 
 const isUrl = (text) => /^(https?:\/\/)?[\w.-]+\.[a-z]{2,}([/?#].*)?$/i.test(text)
 
@@ -20,7 +24,13 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
   const [selectedUser, setSelectedUser] = useState(null)
   const [searching, setSearching] = useState(false)
   const searchTimer = useRef(null)
-  const fileRef = useRef(null)
+
+  // Close on Escape key — safe on all platforms
+  useEffect(() => {
+    const handleKey = (e) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [onClose])
 
   const handleSearch = (value) => {
     setQuery(value)
@@ -109,11 +119,17 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
   const isContact = (id) => contacts?.some((c) => c.id === id)
 
   return (
-    <div className="confirm-overlay" onClick={onClose}>
-      <div className="send-composer" onClick={(e) => e.stopPropagation()}>
+    // NOTE: overlay click-to-close intentionally removed. On Android Chrome,
+    // when the native file picker (bottom sheet) closes and returns focus to
+    // the page, the browser fires a synthetic click event on the document.
+    // If the overlay has onClick={onClose} it triggers and dismisses the
+    // modal before the file is processed. Close is handled by the × button
+    // and Escape key above.
+    <div className="confirm-overlay">
+      <div className="send-composer">
         <div className="send-header">
           <h3>Send to</h3>
-          <button className="send-close" onClick={onClose}>
+          <button className="send-close" onClick={onClose} aria-label="Close">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
             </svg>
@@ -145,11 +161,23 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
             />
           )}
           {!attachment && (
-            <button className="send-attach" onClick={(e) => { e.stopPropagation(); fileRef.current?.click() }}>
+            // Use <label htmlFor> instead of a button with onClick(.click()).
+            // On Android Chrome, programmatic .click() on a file input fires a
+            // synthetic document-level click when the picker closes, which hits
+            // the overlay and dismisses the modal. A native label association
+            // opens the picker without any JS click call.
+            <label htmlFor={FILE_INPUT_ID} className="send-attach" style={{ cursor: 'pointer' }}>
               <IconUpload width="14" height="14" /> Attach
-            </button>
+            </label>
           )}
-          <input ref={fileRef} type="file" accept={ACCEPT} onChange={handleFilePick} hidden onClick={(e) => e.stopPropagation()} />
+          <input
+            id={FILE_INPUT_ID}
+            type="file"
+            accept={ACCEPT}
+            onChange={handleFilePick}
+            hidden
+            aria-hidden="true"
+          />
         </div>
 
         {/* Contacts (quick pick) */}
