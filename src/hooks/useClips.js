@@ -234,16 +234,16 @@ export function useClips(user) {
   // type and whose metadata carries the Cloudinary descriptor. Uses the same
   // optimistic-insert / rollback-on-error pattern as saveText.
   const saveFile = useCallback(async (file, options = {}) => {
-    if (!file || !user) return
-
-    if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) {
-      toast('Upload not configured', 'error')
+    if (!file || !user) {
+      toast('Debug: no file or user', 'error')
       return
     }
 
-    // Size gate BEFORE any upload. On mobile, file.size can be 0 at pick
-    // time (Android populates size lazily). Treat size 0 as unknown — let
-    // the upload proceed and reject only genuinely oversized files.
+    if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) {
+      toast('Upload not configured — check env vars', 'error')
+      return
+    }
+
     const check = validateFile({ type: file.type || 'application/octet-stream', size: file.size || 1 })
     if (!check.ok) {
       const message =
@@ -315,7 +315,8 @@ export function useClips(user) {
       if (err instanceof SizeError) {
         toast(err.message, 'error')
       } else {
-        toast(`Failed to upload ${type === 'image' ? 'image' : 'file'}`, 'error')
+        // Show actual error on mobile so we can diagnose
+        toast(`Upload error: ${err.message}`, 'error')
       }
       console.error('Could not save file:', err.message)
     } finally {
