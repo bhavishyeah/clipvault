@@ -2,8 +2,10 @@
 // Generalizes the inline XHR-with-progress Cloudinary upload from
 // useClips.saveImage into a reusable function used by clip storage,
 // direct send, and group sends. Enforces the size gate before opening
-// the request, routes to the correct Cloudinary resource endpoint by
-// MIME type, reports progress, supports cancellation, and aborts after 60s.
+// the request, always POSTs to the Cloudinary `auto` endpoint so it detects
+// the resource type per file (the unsigned preset is image-oriented; a
+// specific per-kind endpoint causes Cloudinary to reject non-image POSTs),
+// reports progress, supports cancellation, and aborts after 60s.
 
 import { classifyFile, resourceTypeFor, validateFile, SIZE_LIMITS } from './fileType'
 
@@ -44,9 +46,10 @@ export class SizeError extends Error {
  * Upload a file to Cloudinary and normalize the response.
  *
  * Enforces the size gate BEFORE opening the request (throws SizeError on an
- * oversize/empty file — Req 1.6, 2.x), POSTs to the resource endpoint chosen
- * by MIME type (Req 3.1–3.2), always includes the unsigned preset and the
- * per-user folder (Req 3.3), and aborts after 60s (Req 3.5).
+ * oversize/empty file — Req 1.6, 2.x), always POSTs to the `auto` endpoint so
+ * Cloudinary detects the resource type per file (Req 3.1–3.2), always includes
+ * the unsigned preset and the per-user folder (Req 3.3), and aborts after 60s
+ * (Req 3.5).
  *
  * @param {File | Blob & { name?: string, type?: string }} file
  * @param {Object} options
@@ -71,7 +74,6 @@ export async function uploadFile(file, { userId, onProgress, signal } = {}) {
   }
 
   const kind = classifyFile(file.type)
-  const resource = resourceTypeFor(kind)
 
   const formData = new FormData()
   formData.append('file', file)
@@ -137,14 +139,19 @@ export async function uploadFile(file, { userId, onProgress, signal } = {}) {
       reject(new Error('Upload cancelled'))
     })
 
-    xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/${resource}/upload`)
+    // Always POST to the `auto` endpoint so Cloudinary detects the resource
+    // type per file — mixing a specific per-kind endpoint with the
+    // image-oriented unsigned preset causes non-image POSTs to be rejected.
+    xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`)
     xhr.send(formData)
   })
 
   // Normalize the Cloudinary response into an UploadDescriptor (Req 3.4, 1.5, 5.3).
+  // Prefer the resource_type Cloudinary actually stored; fall back to the
+  // MIME-derived guess if the response omits it.
   return {
     secure_url: uploaded.secure_url,
-    resource_type: resource,
+    resource_type: uploaded.resource_type ?? resourceTypeFor(kind),
     bytes: uploaded.bytes,
     format: uploaded.format,
     mime: file.type,

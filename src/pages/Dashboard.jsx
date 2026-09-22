@@ -17,11 +17,9 @@ import EditModal from '../components/ui/EditModal'
 import ClipBody from '../components/clips/ClipBody'
 import SendComposer from '../components/send/SendComposer'
 import IncomingTransfers from '../components/send/IncomingTransfers'
-import RecipientTabs from '../components/send/RecipientTabs'
+import GroupSendPanel from '../components/send/GroupSendPanel'
 import GroupCreateModal from '../components/groups/GroupCreateModal'
-import GroupThread from '../components/groups/GroupThread'
 import MemberList from '../components/groups/MemberList'
-import GroupComposer from '../components/groups/GroupComposer'
 import AddMemberModal from '../components/groups/AddMemberModal'
 import SecuritySettings from '../components/auth/SecuritySettings'
 import {
@@ -63,6 +61,11 @@ const formatBytes = (bytes) => {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
+
+// Guard against optimistic temporary group ids (e.g. "temp-1789731875105").
+// Only real, persisted group ids are valid uuids that can be queried against
+// group_members; temp ids would trigger a 400 (Postgres 22P02) on the backend.
+const isRealGroupId = (id) => typeof id === 'string' && !id.startsWith('temp-')
 
 // Desktop paste input with char count, auto-focus, duplicate detection
 function DesktopPasteInput({ onSave, saving, clips }) {
@@ -125,7 +128,7 @@ function DesktopPasteInput({ onSave, saving, clips }) {
 export default function Dashboard({ user, profile }) {
   const {
     clips, loading, saving, uploadProgress,
-    saveText, saveImage, removeClip, togglePin, editClip, setExpiration, reorderPins,
+    saveText, saveFile, saveImage, removeClip, togglePin, editClip, setExpiration, reorderPins,
   } = useClips(user)
 
   const { theme, toggleTheme } = useTheme()
@@ -137,18 +140,17 @@ export default function Dashboard({ user, profile }) {
   const { incoming, contacts, sending: directSending, searchUsers, sendTo, addContact, removeContact, saveToVault, dismissTransfer } = useDirectSend(user)
   const [showSendComposer, setShowSendComposer] = useState(false)
 
-  // Groups (Feature 3)
+  // Groups — send-only distribution lists (no chat/threads/realtime)
   const {
-    groups, messagesByGroup, createGroup, deleteGroup,
+    groups, createGroup, deleteGroup,
     addMember, removeMember, leaveGroup, members: fetchMembers,
-    sendToGroup, subscribeGroup,
+    sendToGroup,
   } = useGroups(user)
 
-  // Sharing panel + group UI state
-  const [showSharing, setShowSharing] = useState(false)
+  // Group send + management UI state
+  const [showGroupSend, setShowGroupSend] = useState(false)
   const [showGroupCreate, setShowGroupCreate] = useState(false)
-  const [selectedRecipient, setSelectedRecipient] = useState(null)
-  const [selectedGroupId, setSelectedGroupId] = useState(null)
+  const [manageGroupId, setManageGroupId] = useState(null)
   const [groupMemberCounts, setGroupMemberCounts] = useState({})
   const [selectedGroupMembers, setSelectedGroupMembers] = useState([])
   const [addMemberTarget, setAddMemberTarget] = useState(null)
@@ -213,8 +215,8 @@ export default function Dashboard({ user, profile }) {
     searchTimer.current = window.setTimeout(() => { setDebouncedQuery(value); if (value.trim()) trackEvent('search') }, 200)
   }
 
-  // Resolve member counts for the user's groups so RecipientTabs can gate
-  // zero-member groups and show a "delivers to all N members" indicator.
+  // Resolve member counts for the user's groups so GroupSendPanel can show a
+  // "N members" count and a "Send to N members" button label.
   // useGroups.groups does not carry memberCount, so we build a { groupId: count }
   // map here by asking the hook for each group's members once per group set.
   useEffect(() => {
@@ -226,6 +228,7 @@ export default function Dashboard({ user, profile }) {
       }
       const entries = await Promise.all(
         groups.map(async (g) => {
+          if (!isRealGroupId(g.id)) return [g.id, 0]
           const list = await fetchMembers(g.id)
           return [g.id, list.length]
         })
@@ -237,31 +240,31 @@ export default function Dashboard({ user, profile }) {
     return () => { cancelled = true }
   }, [groups, fetchMembers])
 
-  // Load the roster for the currently viewed group (for MemberList). Refreshes
-  // whenever the selected group changes or membership is edited via the counts map.
+  // Load the roster for the group currently being managed (for MemberList).
+  // Refreshes whenever the managed group changes or membership is edited.
   useEffect(() => {
     let cancelled = false
     const load = async () => {
-      if (!selectedGroupId) {
+      if (!manageGroupId || !isRealGroupId(manageGroupId)) {
         if (!cancelled) setSelectedGroupMembers((prev) => (prev.length ? [] : prev))
         return
       }
-      const list = await fetchMembers(selectedGroupId)
+      const list = await fetchMembers(manageGroupId)
       if (!cancelled) setSelectedGroupMembers(list)
     }
     load()
     return () => { cancelled = true }
-  }, [selectedGroupId, fetchMembers, groupMemberCounts])
+  }, [manageGroupId, fetchMembers, groupMemberCounts])
 
-  // Groups augmented with a resolved memberCount for RecipientTabs.
+  // Groups augmented with a resolved memberCount for GroupSendPanel.
   const groupsWithCounts = useMemo(
     () => groups.map((g) => ({ ...g, memberCount: groupMemberCounts[g.id] ?? 0 })),
     [groups, groupMemberCounts]
   )
 
-  const selectedGroup = useMemo(
-    () => groupsWithCounts.find((g) => g.id === selectedGroupId) ?? null,
-    [groupsWithCounts, selectedGroupId]
+  const manageGroup = useMemo(
+    () => groupsWithCounts.find((g) => g.id === manageGroupId) ?? null,
+    [groupsWithCounts, manageGroupId]
   )
 
   const filteredClips = useMemo(() => {
@@ -448,10 +451,11 @@ export default function Dashboard({ user, profile }) {
 
   // Refresh the member-count for a single group after membership changes.
   const refreshGroupCount = useCallback(async (groupId) => {
+    if (!isRealGroupId(groupId)) return
     const list = await fetchMembers(groupId)
     setGroupMemberCounts((prev) => ({ ...prev, [groupId]: list.length }))
-    if (groupId === selectedGroupId) setSelectedGroupMembers(list)
-  }, [fetchMembers, selectedGroupId])
+    if (groupId === manageGroupId) setSelectedGroupMembers(list)
+  }, [fetchMembers, manageGroupId])
 
   // Create a group, then add any members chosen in the modal (GroupCreateModal
   // passes (name, members[]); useGroups.createGroup takes only the name, so we
@@ -465,17 +469,6 @@ export default function Dashboard({ user, profile }) {
     await refreshGroupCount(created.id)
     return created
   }, [createGroup, addMember, refreshGroupCount])
-
-  // A recipient chosen in RecipientTabs. A group selection opens the group view;
-  // a contact selection opens the existing SendComposer pre-focused on contacts.
-  const handleSelectRecipient = useCallback((recipient) => {
-    setSelectedRecipient(recipient)
-    if (recipient?.kind === 'group') {
-      setSelectedGroupId(recipient.id)
-    } else {
-      setSelectedGroupId(null)
-    }
-  }, [])
 
   // MemberList add/remove wiring. onAddMember opens an inline search modal;
   // onRemoveMember removes directly and refreshes the roster/counts.
@@ -492,17 +485,17 @@ export default function Dashboard({ user, profile }) {
 
   const handleDeleteGroup = useCallback(async (groupId) => {
     await deleteGroup(groupId)
-    if (groupId === selectedGroupId) { setSelectedGroupId(null); setSelectedRecipient(null) }
+    if (groupId === manageGroupId) setManageGroupId(null)
     setGroupMemberCounts((prev) => {
       if (!(groupId in prev)) return prev
       const next = { ...prev }; delete next[groupId]; return next
     })
-  }, [deleteGroup, selectedGroupId])
+  }, [deleteGroup, manageGroupId])
 
   const handleLeaveGroup = useCallback(async (groupId) => {
     const ok = await leaveGroup(groupId)
-    if (ok && groupId === selectedGroupId) { setSelectedGroupId(null); setSelectedRecipient(null) }
-  }, [leaveGroup, selectedGroupId])
+    if (ok && groupId === manageGroupId) setManageGroupId(null)
+  }, [leaveGroup, manageGroupId])
 
   const getTypeIcon = (type) => {
     if (type === 'image') return <IconImage />
@@ -575,17 +568,14 @@ export default function Dashboard({ user, profile }) {
           <div className="welcome-left">
             <p className="eyebrow">Your vault</p>
             <h1>Everything you copy,<br /><span>within reach.</span></h1>
-            <p className="welcome-copy">Save text, links and images. Access them from any device, anytime.</p>
-            <div className="welcome-meta">
-              <span className="clip-count-inline"><strong>{clips.length}</strong> clips</span>
-            </div>
+            <p className="welcome-copy">Save text, links, images, audio and files. Access them from any device, anytime.</p>
           </div>
 
           <div className="welcome-right">
             <div className="desktop-paste-box">
               <DesktopPasteInput onSave={saveText} saving={saving} clips={clips} />
             </div>
-            <ImageUpload onImage={saveImage} saving={saving} />
+            <ImageUpload onImage={saveFile} saving={saving} />
           </div>
         </section>
 
@@ -595,11 +585,11 @@ export default function Dashboard({ user, profile }) {
         {/* Send To + Sharing buttons */}
         {!isAnonymous && (
           <div className="share-actions">
-            <button className="send-to-button" onClick={() => setShowSendComposer(true)}>
+            <button className="share-panel-button" onClick={() => setShowSendComposer(true)}>
               Send to @user
             </button>
-            <button className="share-panel-button" onClick={() => setShowSharing(true)}>
-              Contacts &amp; groups
+            <button className="share-panel-button" onClick={() => setShowGroupSend(true)}>
+              Send to group
             </button>
           </div>
         )}
@@ -622,7 +612,7 @@ export default function Dashboard({ user, profile }) {
               <input ref={searchInputRef} value={query} onChange={handleSearchChange} placeholder="Search... (Ctrl+K)" />
             </label>
             <div className="filter-tabs">
-              {['all', 'text', 'link', 'image'].map((type) => (
+              {['all', 'text', 'link', 'image', 'file', 'audio'].map((type) => (
                 <button key={type} className={filter === type ? 'active' : ''} onClick={() => setFilter(type)}>
                   {type === 'all' ? 'All' : type}
                 </button>
@@ -683,7 +673,7 @@ export default function Dashboard({ user, profile }) {
                       <button onClick={() => copyClip(clip)} title="Copy"><IconCopy /></button>
                       {clip.type !== 'image' && <button onClick={() => handleEditClick(clip)} title="Edit"><IconEdit /></button>}
                       {clip.type === 'link' && <button onClick={() => openLink(clip.content)} title="Open"><IconExternalLink /></button>}
-                      {clip.type === 'image' && <button onClick={() => downloadClip(clip)} title="Download"><IconDownload /></button>}
+                      {(clip.type === 'image' || clip.type === 'file' || clip.type === 'audio') && <button onClick={() => downloadClip(clip)} title="Download"><IconDownload /></button>}
                       <button className="expiry-action" onClick={() => handleSetExpiry(clip, clip.expires_at ? null : 7)} title={clip.expires_at ? 'Remove expiry' : 'Expire in 7d'}>
                         {clip.expires_at ? <IconInfinity /> : <IconClock />}
                       </button>
@@ -773,74 +763,47 @@ export default function Dashboard({ user, profile }) {
         </div>
       )}
 
-      {/* Contacts & Groups sharing panel */}
-      {showSharing && (
-        <div className="confirm-overlay" onClick={() => { setShowSharing(false); setSelectedGroupId(null); setSelectedRecipient(null) }}>
-          <div className="sharing-panel" onClick={(e) => e.stopPropagation()}>
+      {/* Send to group — one-shot fan-out distribution list */}
+      {showGroupSend && (
+        <GroupSendPanel
+          onClose={() => setShowGroupSend(false)}
+          groups={groupsWithCounts}
+          groupMemberCounts={groupMemberCounts}
+          onCreateGroup={() => setShowGroupCreate(true)}
+          onManageGroup={(g) => setManageGroupId(g.id)}
+          sendToGroup={sendToGroup}
+          userId={user.id}
+        />
+      )}
+
+      {/* Lightweight group management (owner: add/remove/delete; member: leave) */}
+      {manageGroup && (
+        <div className="confirm-overlay" onClick={() => setManageGroupId(null)}>
+          <div className="send-composer" role="dialog" aria-modal="true" aria-labelledby="group-manage-title" onClick={(e) => e.stopPropagation()}>
             <div className="send-header">
-              <h3>Contacts &amp; groups</h3>
-              <button className="send-close" title="Close" onClick={() => { setShowSharing(false); setSelectedGroupId(null); setSelectedRecipient(null) }}>
+              <h3 id="group-manage-title">{manageGroup.name}</h3>
+              <button className="send-close" title="Close" onClick={() => setManageGroupId(null)}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
               </button>
             </div>
 
-            <div className="sharing-toolbar">
-              <button className="share-panel-button" onClick={() => setShowGroupCreate(true)}>+ New group</button>
-            </div>
-
-            <RecipientTabs
-              contacts={contacts}
-              groups={groupsWithCounts}
-              selectedRecipient={selectedRecipient}
-              onSelectRecipient={handleSelectRecipient}
+            <MemberList
+              group={manageGroup}
+              members={selectedGroupMembers}
+              currentUserId={user.id}
+              onAddMember={(g) => setAddMemberTarget(g)}
+              onRemoveMember={handleRemoveMember}
             />
 
-            {/* Contact selected → jump into the direct Send Composer */}
-            {selectedRecipient?.kind === 'contact' && (
-              <button
-                className="send-button"
-                onClick={() => { setShowSharing(false); setShowSendComposer(true) }}
-              >
-                Compose message to {selectedRecipient.display_name || `@${selectedRecipient.username}`}
-              </button>
-            )}
-
-            {/* Group selected → group thread, composer, and member management */}
-            {selectedGroup && (
-              <div className="group-view">
-                <div className="group-view-header">
-                  <h4>{selectedGroup.name}</h4>
-                  {selectedGroup.isOwner ? (
-                    <button className="group-danger" onClick={() => handleDeleteGroup(selectedGroup.id)}>Delete group</button>
-                  ) : (
-                    <button className="group-danger" onClick={() => handleLeaveGroup(selectedGroup.id)}>Leave group</button>
-                  )}
-                </div>
-
-                <GroupThread
-                  group={selectedGroup}
-                  messages={messagesByGroup[selectedGroup.id] ?? []}
-                  currentUserId={user.id}
-                  onSubscribe={subscribeGroup}
-                />
-
-                <GroupComposer
-                  group={selectedGroup}
-                  userId={user.id}
-                  onSend={sendToGroup}
-                />
-
-                <MemberList
-                  group={selectedGroup}
-                  members={selectedGroupMembers}
-                  currentUserId={user.id}
-                  onAddMember={(g) => setAddMemberTarget(g)}
-                  onRemoveMember={handleRemoveMember}
-                />
-              </div>
-            )}
+            <div className="group-view-header">
+              {manageGroup.isOwner ? (
+                <button className="group-danger" onClick={() => handleDeleteGroup(manageGroup.id)}>Delete group</button>
+              ) : (
+                <button className="group-danger" onClick={() => handleLeaveGroup(manageGroup.id)}>Leave group</button>
+              )}
+            </div>
           </div>
         </div>
       )}

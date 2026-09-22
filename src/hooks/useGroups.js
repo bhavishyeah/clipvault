@@ -2,22 +2,24 @@ import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { toast } from '../components/ui/toastStore'
 import { trackEvent } from '../lib/analytics'
-import { validateGroupName, canSendToGroup } from '../lib/group'
+import { validateGroupName } from '../lib/group'
 import { validateFile, SIZE_LIMITS } from '../lib/fileType'
 
-// VOLT — Groups hook (Feature 3: group sharing)
+// VOLT — Groups hook (send-only distribution lists)
 //
-// Manages the groups the current user belongs to, their membership, and their
-// messages. Follows the same conventions as useClips / useDirectSend:
-// optimistic insert with rollback, Supabase Realtime postgres_changes channels,
-// toast notifications, and trackEvent analytics. Pure gates (name validation,
-// send-permission by member count, file size) live in src/lib/group.js and
-// src/lib/fileType.js; this hook performs the side-effecting Supabase calls and
-// holds the group/message state.
+// A group is simply a named set of members. There is NO chat, NO threads, NO
+// realtime, and NO message history. Sending to a group fans the item out to
+// each OTHER member's Incoming inbox by inserting one direct_transfers row per
+// recipient (tagged with the group name), then the caller shows a single
+// confirmation toast.
 //
-// Row Level Security enforces the authoritative rules — non-owners cannot
-// delete a group, non-members cannot read or send messages. The hook applies
-// the same rules optimistically for UX and rolls back when RLS rejects.
+// The hook manages the groups the current user belongs to plus their
+// membership (create / delete / add / remove / leave / members) and performs
+// the fan-out send. Pure gates (name validation, file size) live in
+// src/lib/group.js and src/lib/fileType.js. Row Level Security enforces the
+// authoritative rules — non-owners cannot delete a group, and the
+// direct_transfers insert policy (WITH CHECK auth.uid() = sender_id) allows the
+// sender to insert the multi-row fan-out.
 
 // Is a Supabase error a unique-constraint (duplicate PK) violation? Postgres
 // reports code 23505; the message also mentions "duplicate".
@@ -28,7 +30,6 @@ function isUniqueViolation(error) {
 
 export function useGroups(user) {
   const [groups, setGroups] = useState([])
-  const [messagesByGroup, setMessagesByGroup] = useState({})
   const [loading, setLoading] = useState(true)
 
   // --- Load the user's groups on mount (Req 11.3) ---
@@ -184,13 +185,6 @@ export function useGroups(user) {
       return
     }
 
-    // Drop cached messages for the removed group.
-    setMessagesByGroup((prev) => {
-      if (!(groupId in prev)) return prev
-      const next = { ...prev }
-      delete next[groupId]
-      return next
-    })
     toast('Group deleted')
     trackEvent('group_delete')
   }, [groups])
@@ -279,12 +273,6 @@ export function useGroups(user) {
       return false
     }
 
-    setMessagesByGroup((prev) => {
-      if (!(groupId in prev)) return prev
-      const next = { ...prev }
-      delete next[groupId]
-      return next
-    })
     toast('You left the group')
     trackEvent('group_leave')
     return true
@@ -324,26 +312,47 @@ export function useGroups(user) {
     }))
   }, [])
 
-  // --- Send one message to a group (Req 14.1, 14.4, 14.5, 14.6) ---
-  // Returns { ok: true } on success, or { ok: false, error } on failure so the
-  // caller can retain the composed content (Req 14.6).
-  const sendToGroup = useCallback(async (groupId, type, content, fileData) => {
+  // --- Send one item to a group by fanning it out to each member's Incoming ---
+  // A group is a distribution list: sending inserts ONE direct_transfers row per
+  // OTHER member (the sender is excluded), all tagged with `group.name` so the
+  // recipient's Incoming card can show which group it came from. The file (if
+  // any) was uploaded once by the caller, so every row shares the same file_url
+  // — no re-upload. All rows are inserted in a single round-trip; the
+  // direct_transfers insert policy (WITH CHECK auth.uid() = sender_id) permits
+  // the multi-row insert since the sender owns every row.
+  //
+  // `group` is the full group object ({ id, name, ... }) so we have group.name
+  // for the tag. Returns { ok: true, count } on success or { ok: false, error }
+  // on failure so the caller can retain the composed content.
+  const sendToGroup = useCallback(async (group, type, content, fileData) => {
     if (!user) return { ok: false, error: 'Not signed in' }
+    if (!group?.id) return { ok: false, error: 'no_group' }
 
-    // Block sends to a group with no members to receive them (Req 13.5).
-    const { count: memberCount } = await supabase
+    // Load the group's members and exclude the current user — a send only goes
+    // to OTHER people. A group with no other members has nobody to receive it.
+    const { data: memberRows, error: memberErr } = await supabase
       .from('group_members')
-      .select('user_id', { count: 'exact', head: true })
-      .eq('group_id', groupId)
+      .select('user_id')
+      .eq('group_id', group.id)
 
-    if (!canSendToGroup(memberCount ?? 0)) {
-      toast('This group has no members to receive the item', 'error')
+    if (memberErr) {
+      toast('Send did not complete', 'error')
+      console.error('Could not load group members for send:', memberErr.message)
+      return { ok: false, error: memberErr.message }
+    }
+
+    const recipientIds = (memberRows ?? [])
+      .map((r) => r.user_id)
+      .filter((id) => id !== user.id)
+
+    if (recipientIds.length === 0) {
+      toast('This group has no other members to send to', 'error')
       return { ok: false, error: 'no_members' }
     }
 
-    // Size gate for file/audio before any store (Req 14.5). The uploaded
-    // fileData is produced by uploadFile; re-check the reported size here so a
-    // send never stores a row for an oversize asset.
+    // Size gate for file/audio before any store. The uploaded fileData is
+    // produced by uploadFile; re-check the reported size here so a send never
+    // stores rows for an oversize asset.
     if (type === 'file' || type === 'audio') {
       const size = fileData?.size ?? fileData?.bytes
       const mime = fileData?.mime ?? fileData?.mime_type
@@ -359,60 +368,36 @@ export function useGroups(user) {
       }
     }
 
-    // Insert exactly one group_messages row (Req 14.1). RLS "members send
-    // messages" rejects non-members (Req 14.4).
-    const { error } = await supabase.from('group_messages').insert({
-      group_id: groupId,
+    // One row template fanned out across every recipient. All rows share the
+    // same file fields (single prior upload) and the group_name tag.
+    const rows = recipientIds.map((recipientId) => ({
       sender_id: user.id,
+      recipient_id: recipientId,
       type,
       content: content || null,
-      file_url: fileData?.url ?? fileData?.secure_url ?? null,
+      file_url: fileData?.secure_url ?? fileData?.url ?? null,
       file_name: fileData?.name ?? null,
-      file_size: fileData?.size ?? fileData?.bytes ?? null,
+      file_size: fileData?.bytes ?? fileData?.size ?? null,
       mime_type: fileData?.mime ?? fileData?.mime_type ?? null,
-    })
+      status: 'pending',
+      group_name: group.name,
+    }))
+
+    const { error } = await supabase.from('direct_transfers').insert(rows)
 
     if (error) {
-      // Retain composed content (Req 14.6); do not clear the input.
       toast('Send did not complete', 'error')
       console.error('Could not send to group:', error.message)
       return { ok: false, error: error.message }
     }
 
+    toast(`Sent successfully to all ${rows.length} member${rows.length === 1 ? '' : 's'}`)
     trackEvent('group_send')
-    return { ok: true }
+    return { ok: true, count: rows.length }
   }, [user])
-
-  // --- Subscribe to a group's messages via Realtime (Req 14.2) ---
-  // Returns an unsubscribe cleanup the caller invokes on unmount.
-  const subscribeGroup = useCallback((groupId) => {
-    const channel = supabase
-      .channel(`group-${groupId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'group_messages',
-          filter: `group_id=eq.${groupId}`,
-        },
-        (payload) => {
-          setMessagesByGroup((prev) => {
-            const existing = prev[groupId] ?? []
-            // Avoid duplicating a message already present.
-            if (existing.some((m) => m.id === payload.new.id)) return prev
-            return { ...prev, [groupId]: [...existing, payload.new] }
-          })
-        }
-      )
-      .subscribe()
-
-    return () => { supabase.removeChannel(channel) }
-  }, [])
 
   return {
     groups,
-    messagesByGroup,
     loading,
     createGroup,
     deleteGroup,
@@ -421,6 +406,5 @@ export function useGroups(user) {
     leaveGroup,
     members,
     sendToGroup,
-    subscribeGroup,
   }
 }

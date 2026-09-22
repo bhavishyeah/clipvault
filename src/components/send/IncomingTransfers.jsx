@@ -13,6 +13,11 @@ export default function IncomingTransfers({ transfers, onSaveToVault, onDismiss 
             <div className="incoming-header">
               <span className="incoming-from">
                 From <strong>@{t.sender?.username || 'unknown'}</strong>
+                {t.group_name && (
+                  <span className="incoming-group-badge" title={`Sent to the ${t.group_name} group`}>
+                    👥 {t.group_name}
+                  </span>
+                )}
               </span>
               <span className="incoming-type">{t.type}</span>
             </div>

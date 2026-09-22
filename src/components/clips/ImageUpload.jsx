@@ -1,69 +1,57 @@
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import { toast } from '../ui/toastStore'
 import { IconUpload } from '../ui/Icons'
 
-const ACCEPTED_TYPES = ['image/jpeg', 'image/jpg', 'image/png']
-const MAX_SIZE = 10 * 1024 * 1024 // 10MB
+const MAX_SIZE = 15 * 1024 * 1024 // 15MB
+const INPUT_ID = 'vault-file-upload'
 
 export default function ImageUpload({ onImage, saving }) {
-  const inputRef = useRef(null)
   const [dragOver, setDragOver] = useState(false)
-
-  const validateAndUpload = (file) => {
-    if (!file) return
-
-    if (!ACCEPTED_TYPES.includes(file.type)) {
-      toast('Only JPG and PNG images are supported', 'error')
-      return
-    }
-
-    if (file.size > MAX_SIZE) {
-      toast('Image must be under 10MB', 'error')
-      return
-    }
-
-    onImage(file)
-  }
 
   const handleFileChange = (e) => {
     const file = e.target.files?.[0]
-    validateAndUpload(file)
-    // Reset so the same file can be selected again
+    // Reset input so the same file can be re-selected
     e.target.value = ''
+    if (!file) return
+    if (file.size > MAX_SIZE) {
+      toast('File must be under 15MB', 'error')
+      return
+    }
+    onImage(file)
   }
 
   const handleDrop = (e) => {
     e.preventDefault()
     setDragOver(false)
-
     const file = e.dataTransfer.files?.[0]
-    validateAndUpload(file)
+    if (!file) return
+    if (file.size > MAX_SIZE) {
+      toast('File must be under 15MB', 'error')
+      return
+    }
+    onImage(file)
   }
-
-  const handleDragOver = (e) => {
-    e.preventDefault()
-    setDragOver(true)
-  }
-
-  const handleDragLeave = () => setDragOver(false)
 
   return (
-    <div
+    <label
+      htmlFor={INPUT_ID}
       className={`image-upload-zone ${dragOver ? 'drag-over' : ''}`}
       onDrop={handleDrop}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onClick={() => inputRef.current?.click()}
-      role="button"
-      tabIndex={0}
-      aria-label="Upload an image"
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') inputRef.current?.click() }}
+      onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+      onDragLeave={() => setDragOver(false)}
+      aria-label="Upload a file"
+      style={{ cursor: saving ? 'not-allowed' : 'pointer' }}
     >
+      {/* Native file input — linked via label htmlFor so the browser opens the
+          picker without a JS .click() call, avoiding the Android PWA reload bug
+          where programmatic .click() triggers a popstate/navigation event that
+          the Service Worker intercepts and resets the page. */}
       <input
-        ref={inputRef}
+        id={INPUT_ID}
         type="file"
-        accept=".jpg,.jpeg,.png"
+        accept="image/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip"
         onChange={handleFileChange}
+        disabled={saving}
         hidden
         aria-hidden="true"
       />
@@ -72,13 +60,13 @@ export default function ImageUpload({ onImage, saving }) {
         <span className="image-upload-icon"><IconUpload /></span>
         <div>
           <p className="image-upload-label">
-            {saving ? 'Uploading…' : 'Upload image'}
+            {saving ? 'Uploading…' : 'Upload file'}
           </p>
           <p className="image-upload-hint">
-            Drop an image here or tap to browse. JPG/PNG, max 10MB.
+            Drop any file here or tap to browse. Max 15MB.
           </p>
         </div>
       </div>
-    </div>
+    </label>
   )
 }

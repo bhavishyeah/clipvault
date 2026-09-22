@@ -4,8 +4,9 @@
 //
 // Property 4: for any valid (within-size) file, the normalized UploadDescriptor
 // has every field defined/non-null, and the outgoing request always includes
-// the unsigned upload preset and the `volt/{userId}` folder, POSTing to the
-// resource segment chosen by resourceTypeFor(classifyFile(mime)).
+// the unsigned upload preset and the `volt/{userId}` folder, always POSTing to
+// the `auto` endpoint (Cloudinary detects the resource type per file), and the
+// descriptor echoes the resource_type Cloudinary reports.
 //
 // This exercises the real uploadFile against a mocked XMLHttpRequest that
 // synchronously fires a successful `load` with a canned Cloudinary response.
@@ -14,7 +15,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fc from 'fast-check'
-import { classifyFile, resourceTypeFor, SIZE_LIMITS } from './fileType.js'
+import { SIZE_LIMITS } from './fileType.js'
 
 const RUNS = 100
 
@@ -28,6 +29,11 @@ const { uploadFile } = await import('./uploadFile.js')
 // Holds the request details captured by the most recent fake XHR instance.
 let lastRequest
 
+// The resource_type the canned Cloudinary response reports. The descriptor
+// must echo THIS value (what Cloudinary actually stored), not a MIME-derived
+// guess — 'raw' is a value the client never derives, proving the echo.
+const CANNED_RESOURCE_TYPE = 'raw'
+
 // A minimal fake XMLHttpRequest that records the URL and synchronously fires a
 // successful load with a canned Cloudinary JSON body when send() is called.
 class FakeXHR {
@@ -37,6 +43,7 @@ class FakeXHR {
     this.status = 200
     this.responseText = JSON.stringify({
       secure_url: 'https://res.cloudinary.com/test-cloud/upload/canned.bin',
+      resource_type: CANNED_RESOURCE_TYPE,
       bytes: 12345,
       format: 'bin',
     })
@@ -79,8 +86,8 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-// MIME types spanning all three classifications, so image/audio/file
-// resource-segment routing is exercised.
+// MIME types spanning all three classifications; regardless of kind the POST
+// must always target the `auto` endpoint.
 const mimeArb = fc.constantFrom(
   'image/png',
   'image/jpeg',
@@ -130,11 +137,11 @@ describe('Property 4: Upload descriptor completeness', () => {
         expect(lastRequest.fields.folder).toBe(`volt/${userId}`)
         expect(lastRequest.fields.file).toBe(file)
 
-        // (c) POST URL targets the resource segment for this MIME (Req 3.3, 3.4).
-        const expectedResource = resourceTypeFor(classifyFile(mime))
+        // (c) POST always targets the `auto` endpoint regardless of MIME, and
+        // the descriptor echoes the resource_type Cloudinary reported (Req 3.3, 3.4).
         expect(lastRequest.method).toBe('POST')
-        expect(lastRequest.url).toContain(`/${expectedResource}/upload`)
-        expect(descriptor.resource_type).toBe(expectedResource)
+        expect(lastRequest.url).toContain('/auto/upload')
+        expect(descriptor.resource_type).toBe(CANNED_RESOURCE_TYPE)
       }),
       { numRuns: RUNS },
     )

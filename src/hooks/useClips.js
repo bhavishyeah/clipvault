@@ -149,9 +149,13 @@ export function useClips(user) {
         },
         async (payload) => {
           const enriched = await resolveUrl(payload.new)
-          setClips((prev) =>
-            sortClips(prev.map((c) => (c.id === enriched.id ? enriched : c)))
-          )
+          setClips((prev) => {
+            const existing = prev.find((c) => c.id === enriched.id)
+            // Merge so partial realtime payloads (missing content/metadata when
+            // only is_pinned changed) don't blank out fields that haven't changed.
+            const merged = existing ? { ...existing, ...enriched } : enriched
+            return sortClips(prev.map((c) => (c.id === merged.id ? merged : c)))
+          })
         }
       )
       .on(
