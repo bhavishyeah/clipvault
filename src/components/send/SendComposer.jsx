@@ -61,16 +61,18 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
     e.target.value = ''
     if (!file) return
 
-    // Don't gate on validateFile here — on Android, file.size can be 0 at
-    // picker time (populated async), which would falsely reject valid files.
-    // Size validation happens at upload time in uploadFile/saveFile instead.
     const kind = classifyFile(file.type || 'application/octet-stream')
     if (attachment?.preview) URL.revokeObjectURL(attachment.preview)
-    setAttachment({
+
+    const newAttachment = {
       file,
       kind,
-      preview: kind === 'image' ? URL.createObjectURL(file) : null,
-    })
+      preview: kind === 'image' && file.size > 0 ? URL.createObjectURL(file) : null,
+    }
+
+    // Defer state update one microtask so any stray click events fired by the
+    // Android file picker bottom sheet finish propagating first.
+    Promise.resolve().then(() => setAttachment(newAttachment))
   }
 
   const selectUser = (u) => {
