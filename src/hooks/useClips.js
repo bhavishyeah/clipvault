@@ -3,8 +3,7 @@ import { supabase } from '../lib/supabaseClient'
 import { toast } from '../components/ui/toastStore'
 import { trackEvent } from '../lib/analytics'
 import { checkRateLimit } from '../lib/rateLimit'
-import { uploadFile, SizeError } from '../lib/uploadFile'
-import { classifyFile, validateFile, SIZE_LIMITS } from '../lib/fileType'
+import { classifyFile } from '../lib/fileType'
 
 const SUPABASE_BUCKET = 'clips'
 const CLOUDINARY_CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
@@ -234,23 +233,10 @@ export function useClips(user) {
   // type and whose metadata carries the Cloudinary descriptor. Uses the same
   // optimistic-insert / rollback-on-error pattern as saveText.
   const saveFile = useCallback(async (file, options = {}) => {
-    if (!file || !user) {
-      toast('Debug: no file or user', 'error')
-      return
-    }
+    if (!file || !user) return
 
     if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) {
-      toast('Upload not configured — check env vars', 'error')
-      return
-    }
-
-    const check = validateFile({ type: file.type || 'application/octet-stream', size: file.size || 1 })
-    if (!check.ok) {
-      const message =
-        check.reason === 'too_large'
-          ? `File exceeds the ${check.limit === SIZE_LIMITS.audio ? '10' : '15'} MB limit`
-          : 'File is empty'
-      toast(message, 'error')
+      toast('Upload not configured', 'error')
       return
     }
 
@@ -259,7 +245,7 @@ export function useClips(user) {
       return
     }
 
-    const type = classifyFile(file.type)
+    const type = classifyFile(file.type || 'application/octet-stream')
     const optimisticId = `temp-${Date.now()}`
     const optimistic = {
       id: optimisticId,
@@ -283,22 +269,35 @@ export function useClips(user) {
     setClips((prev) => sortClips([optimistic, ...prev]))
 
     try {
-      const descriptor = await uploadFile(file, {
-        userId: user.id,
-        onProgress: setUploadProgress,
-      })
+      // Direct fetch to Cloudinary — bypasses the uploadFile helper which
+      // uses XHR + validateFile. Direct fetch works reliably on Android mobile
+      // where XHR and file.size===0 can cause silent failures.
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET)
+      formData.append('folder', `volt/${user.id}`)
+
+      const res = await fetch(
+        `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`,
+        { method: 'POST', body: formData }
+      )
+      const uploaded = await res.json()
+
+      if (!res.ok) {
+        throw new Error(uploaded?.error?.message || `Upload failed (${res.status})`)
+      }
 
       const insertData = {
         user_id: user.id,
         type,
         metadata: {
           provider: 'cloudinary',
-          secure_url: descriptor.secure_url,
-          resource_type: descriptor.resource_type,
-          bytes: descriptor.bytes,
-          format: descriptor.format,
-          mime: descriptor.mime,
-          name: descriptor.name,
+          secure_url: uploaded.secure_url,
+          resource_type: uploaded.resource_type,
+          bytes: uploaded.bytes,
+          format: uploaded.format,
+          mime: file.type || 'application/octet-stream',
+          name: file.name || `file-${Date.now()}`,
         },
       }
       if (options.expiresAt) insertData.expires_at = options.expiresAt
@@ -310,14 +309,8 @@ export function useClips(user) {
       toast(type === 'image' ? 'Image saved' : type === 'audio' ? 'Audio saved' : 'File saved')
       trackEvent(type === 'image' ? 'save_image' : 'save_file')
     } catch (err) {
-      // Roll back the optimistic entry — nothing is stored on failure (Req 1.7).
       setClips((prev) => prev.filter((c) => c.id !== optimisticId))
-      if (err instanceof SizeError) {
-        toast(err.message, 'error')
-      } else {
-        // Show actual error on mobile so we can diagnose
-        toast(`Upload error: ${err.message}`, 'error')
-      }
+      toast(`Upload error: ${err.message}`, 'error')
       console.error('Could not save file:', err.message)
     } finally {
       setSaving(false)

@@ -2,30 +2,31 @@ import { useEffect, useRef, useState } from 'react'
 import { IconSearch, IconUpload } from '../ui/Icons'
 import { toast } from '../ui/toastStore'
 import FileCard from '../ui/FileCard'
-import { uploadFile, SizeError } from '../../lib/uploadFile'
 import { classifyFile } from '../../lib/fileType'
 
-// Unique id for the hidden file input — avoids collisions if composer is
-// ever rendered more than once.
+// Use the original direct-fetch approach that worked on mobile.
+// The shared uploadFile() helper introduced validateFile() which silently
+// rejects Android files (file.size===0 at pick time). Fetching directly to
+// Cloudinary bypasses that gate entirely.
+const CLOUDINARY_CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
+const CLOUDINARY_UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
+
+const ACCEPT = 'image/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip'
 const FILE_INPUT_ID = 'send-composer-file-input'
 
 const isUrl = (text) => /^(https?:\/\/)?[\w.-]+\.[a-z]{2,}([/?#].*)?$/i.test(text)
 
-// Broadened picker scope: images, audio, and common document types. Selections
-// are still gated by `validateFile` in the pick handler, so the accept list is
-// only a first-pass filter for the native dialog.
-const ACCEPT = 'image/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip'
-
 export default function SendComposer({ onClose, searchUsers, sendTo, sending, userId, contacts, addContact, removeContact }) {
   const [content, setContent] = useState('')
-  const [attachment, setAttachment] = useState(null)
+  const [attachment, setAttachment] = useState(null) // { file, kind, preview }
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
   const [selectedUser, setSelectedUser] = useState(null)
   const [searching, setSearching] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const searchTimer = useRef(null)
 
-  // Close on Escape key — safe on all platforms
+  // Close on Escape
   useEffect(() => {
     const handleKey = (e) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', handleKey)
@@ -36,9 +37,7 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
     setQuery(value)
     setSelectedUser(null)
     window.clearTimeout(searchTimer.current)
-
     if (value.length < 2) { setResults([]); return }
-
     setSearching(true)
     searchTimer.current = window.setTimeout(async () => {
       const users = await searchUsers(value)
@@ -48,14 +47,10 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
   }
 
   const clearAttachment = () => {
-    setAttachment((prev) => {
-      if (prev?.preview) URL.revokeObjectURL(prev.preview)
-      return null
-    })
+    if (attachment?.preview) URL.revokeObjectURL(attachment.preview)
+    setAttachment(null)
   }
 
-  // Gate the selection on `validateFile` BEFORE upload. On rejection we toast
-  // and return, retaining composer state (content/recipient are untouched).
   const handleFilePick = (e) => {
     const file = e.target.files?.[0]
     e.target.value = ''
@@ -64,15 +59,15 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
     const kind = classifyFile(file.type || 'application/octet-stream')
     if (attachment?.preview) URL.revokeObjectURL(attachment.preview)
 
-    const newAttachment = {
-      file,
-      kind,
-      preview: kind === 'image' && file.size > 0 ? URL.createObjectURL(file) : null,
-    }
-
-    // Defer state update one microtask so any stray click events fired by the
-    // Android file picker bottom sheet finish propagating first.
-    Promise.resolve().then(() => setAttachment(newAttachment))
+    // Defer one microtask so post-picker browser click events finish first
+    Promise.resolve().then(() => {
+      setAttachment({
+        file,
+        kind,
+        // Only create object URL for images with known size
+        preview: kind === 'image' && file.size > 0 ? URL.createObjectURL(file) : null,
+      })
+    })
   }
 
   const selectUser = (u) => {
@@ -90,18 +85,43 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
     let fileData = null
 
     if (attachment) {
-      type = attachment.kind
+      if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) {
+        toast('Upload not configured', 'error')
+        return
+      }
+
+      setUploading(true)
       try {
-        // Shared Upload_Service handles the size gate, resource routing and
-        // response normalization into an UploadDescriptor.
-        fileData = await uploadFile(attachment.file, { userId })
+        const formData = new FormData()
+        formData.append('file', attachment.file)
+        formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET)
+        formData.append('folder', `volt/${userId}`)
+
+        // Direct fetch — same approach as the original working code
+        const res = await fetch(
+          `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`,
+          { method: 'POST', body: formData }
+        )
+        const uploaded = await res.json()
+
+        if (!res.ok) {
+          toast(`Upload failed: ${uploaded?.error?.message || res.status}`, 'error')
+          return
+        }
+
+        type = attachment.kind
+        fileData = {
+          secure_url: uploaded.secure_url,
+          name: attachment.file.name || `file-${Date.now()}`,
+          bytes: uploaded.bytes ?? attachment.file.size,
+          mime: attachment.file.type || 'application/octet-stream',
+        }
         finalContent = null
       } catch (err) {
-        // SizeError carries its own human message; other failures fall back to
-        // a generic message. In both cases the composer stays open.
-        const message = err instanceof SizeError ? err.message : 'Upload failed — check your connection'
-        toast(message, 'error')
+        toast(`Upload failed: ${err.message}`, 'error')
         return
+      } finally {
+        setUploading(false)
       }
     } else if (isUrl(finalContent)) {
       type = 'link'
@@ -112,14 +132,9 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
   }
 
   const isContact = (id) => contacts?.some((c) => c.id === id)
+  const isBusy = sending || uploading
 
   return (
-    // NOTE: overlay click-to-close intentionally removed. On Android Chrome,
-    // when the native file picker (bottom sheet) closes and returns focus to
-    // the page, the browser fires a synthetic click event on the document.
-    // If the overlay has onClick={onClose} it triggers and dismisses the
-    // modal before the file is processed. Close is handled by the × button
-    // and Escape key above.
     <div className="confirm-overlay">
       <div className="send-composer">
         <div className="send-header">
@@ -131,10 +146,9 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
           </button>
         </div>
 
-        {/* Content input */}
         <div className="send-content-area">
           {attachment ? (
-            attachment.kind === 'image' ? (
+            attachment.kind === 'image' && attachment.preview ? (
               <div className="send-image-preview">
                 <img src={attachment.preview} alt="To send" />
                 <button onClick={clearAttachment} className="send-remove-image">Remove</button>
@@ -156,11 +170,6 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
             />
           )}
           {!attachment && (
-            // Use <label htmlFor> instead of a button with onClick(.click()).
-            // On Android Chrome, programmatic .click() on a file input fires a
-            // synthetic document-level click when the picker closes, which hits
-            // the overlay and dismisses the modal. A native label association
-            // opens the picker without any JS click call.
             <label htmlFor={FILE_INPUT_ID} className="send-attach" style={{ cursor: 'pointer' }}>
               <IconUpload width="14" height="14" /> Attach
             </label>
@@ -175,7 +184,6 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
           />
         </div>
 
-        {/* Contacts (quick pick) */}
         {contacts && contacts.length > 0 && !selectedUser && !query && (
           <div className="send-contacts">
             <span className="send-contacts-label">Contacts</span>
@@ -190,7 +198,6 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
           </div>
         )}
 
-        {/* Recipient search */}
         <div className="send-recipient">
           <div className="send-search-box">
             <IconSearch width="14" height="14" />
@@ -237,9 +244,9 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
         <button
           className="send-button"
           onClick={handleSend}
-          disabled={sending || (!content.trim() && !attachment) || !selectedUser}
+          disabled={isBusy || (!content.trim() && !attachment) || !selectedUser}
         >
-          {sending ? 'Sending...' : 'Send'}
+          {uploading ? 'Uploading...' : sending ? 'Sending...' : 'Send'}
         </button>
       </div>
     </div>
