@@ -255,8 +255,11 @@ export function useDirectSend(user) {
       trackEvent(type === 'image' ? 'send_image' : hasFile ? 'send_file' : 'send_text')
       return true
     } catch (err) {
-      toast('Failed to send', 'error')
-      console.error('Direct send error:', err.message)
+      // Surface the actual error message so DB constraint violations are visible
+      const msg = err.message || 'Failed to send'
+      toast(msg.includes('violates') || msg.includes('constraint')
+        ? `Send failed: ${msg}` : 'Failed to send', 'error')
+      console.error('Direct send error:', msg)
       return false
     } finally {
       setSending(false)
