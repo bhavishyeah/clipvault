@@ -3,7 +3,7 @@ import { IconSearch, IconUpload } from '../ui/Icons'
 import { toast } from '../ui/toastStore'
 import FileCard from '../ui/FileCard'
 import { uploadFile, SizeError } from '../../lib/uploadFile'
-import { classifyFile, validateFile, humanSize } from '../../lib/fileType'
+import { classifyFile } from '../../lib/fileType'
 
 // Unique id for the hidden file input — avoids collisions if composer is
 // ever rendered more than once.
@@ -61,17 +61,10 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
     e.target.value = ''
     if (!file) return
 
-    const check = validateFile({ type: file.type, size: file.size })
-    if (!check.ok) {
-      const message =
-        check.reason === 'too_large'
-          ? `Too large — max ${humanSize(check.limit)}`
-          : 'File is empty'
-      toast(message, 'error')
-      return
-    }
-
-    const kind = classifyFile(file.type)
+    // Don't gate on validateFile here — on Android, file.size can be 0 at
+    // picker time (populated async), which would falsely reject valid files.
+    // Size validation happens at upload time in uploadFile/saveFile instead.
+    const kind = classifyFile(file.type || 'application/octet-stream')
     if (attachment?.preview) URL.revokeObjectURL(attachment.preview)
     setAttachment({
       file,

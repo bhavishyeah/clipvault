@@ -3,7 +3,7 @@ import { IconUpload } from '../ui/Icons'
 import { toast } from '../ui/toastStore'
 import FileCard from '../ui/FileCard'
 import { uploadFile, SizeError } from '../../lib/uploadFile'
-import { classifyFile, validateFile, humanSize } from '../../lib/fileType'
+import { classifyFile } from '../../lib/fileType'
 
 // VOLT — GroupSendPanel (send-only distribution lists)
 //
@@ -78,22 +78,15 @@ export default function GroupSendPanel({
     setSelectedGroup(null)
   }
 
-  // Gate the selection on `validateFile` BEFORE upload, retaining composer state.
   const handleFilePick = (e) => {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
 
-    const check = validateFile({ type: file.type, size: file.size })
-    if (!check.ok) {
-      toast(
-        check.reason === 'too_large' ? `Too large — max ${humanSize(check.limit)}` : 'File is empty',
-        'error'
-      )
-      return
-    }
-
-    const kind = classifyFile(file.type)
+    // Don't gate on validateFile here — on Android, file.size can be 0 at
+    // picker time, which falsely rejects valid files. Size validation happens
+    // at upload time in uploadFile instead.
+    const kind = classifyFile(file.type || 'application/octet-stream')
     if (attachment?.preview) URL.revokeObjectURL(attachment.preview)
     setAttachment({
       file,
