@@ -58,16 +58,14 @@ export default defineConfig({
 
       workbox: {
         cleanupOutdatedCaches: true,
-        navigateFallback: '/index.html',
-        // Restrict navigateFallback to actual app routes only. Without this,
-        // Workbox intercepts the file-picker focus-return on Android Chrome PWA
-        // as a navigation event and resets the page to index.html.
-        navigateFallbackAllowlist: [/^\/$/, /^\/index\.html(\?.*)?$/],
-        navigateFallbackDenylist: [/^\/api\//, /^\/__/, /cloudinary/],
-        skipWaiting: true,
-        clientsClaim: true,
+        // navigateFallback intentionally removed — it intercepts ALL navigation
+        // events on Android Chrome (including file-picker focus-returns, tab
+        // switches, and popup closes) and reloads the page. VOLT requires
+        // internet to function so offline navigation fallback is unnecessary.
+        skipWaiting: false,
+        clientsClaim: false,
 
-        // Runtime caching for offline support
+        // Runtime caching for offline asset viewing
         runtimeCaching: [
           {
             // Cache Cloudinary images for offline viewing
