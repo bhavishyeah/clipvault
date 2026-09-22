@@ -63,8 +63,10 @@ export async function uploadFile(file, { userId, onProgress, signal } = {}) {
     throw new Error('Upload not configured')
   }
 
-  // Size gate BEFORE opening the request (Req 1.6, 2.1, 2.2).
-  const check = validateFile({ type: file.type, size: file.size })
+  // Size gate BEFORE opening the request. On mobile (Android), file.size can
+  // be 0 at pick time — treat as unknown and let the upload attempt proceed.
+  // Cloudinary will reject genuinely empty files at the server level.
+  const check = validateFile({ type: file.type || 'application/octet-stream', size: file.size || 1 })
   if (!check.ok) {
     const message =
       check.reason === 'too_large'

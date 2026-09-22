@@ -241,8 +241,10 @@ export function useClips(user) {
       return
     }
 
-    // Size gate BEFORE any upload (Req 1.6). No clip is inserted on rejection.
-    const check = validateFile({ type: file.type, size: file.size })
+    // Size gate BEFORE any upload. On mobile, file.size can be 0 at pick
+    // time (Android populates size lazily). Treat size 0 as unknown — let
+    // the upload proceed and reject only genuinely oversized files.
+    const check = validateFile({ type: file.type || 'application/octet-stream', size: file.size || 1 })
     if (!check.ok) {
       const message =
         check.reason === 'too_large'
