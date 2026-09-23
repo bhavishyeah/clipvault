@@ -2,14 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { IconSearch, IconUpload } from '../ui/Icons'
 import { toast } from '../ui/toastStore'
 import FileCard from '../ui/FileCard'
+import { uploadFile, SizeError } from '../../lib/uploadFile'
 import { classifyFile } from '../../lib/fileType'
-
-// Use the original direct-fetch approach that worked on mobile.
-// The shared uploadFile() helper introduced validateFile() which silently
-// rejects Android files (file.size===0 at pick time). Fetching directly to
-// Cloudinary bypasses that gate entirely.
-const CLOUDINARY_CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
-const CLOUDINARY_UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
 
 const ACCEPT = 'image/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip'
 const FILE_INPUT_ID = 'send-composer-file-input'
@@ -25,13 +19,22 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
   const [searching, setSearching] = useState(false)
   const [uploading, setUploading] = useState(false)
   const searchTimer = useRef(null)
+  const fileInputRef = useRef(null)
+  const previewUrlRef = useRef(null)
+  const isBusy = sending || uploading
 
-  // Close on Escape
+  // Close on Escape only when no upload/send owns the Android File input.
   useEffect(() => {
-    const handleKey = (e) => { if (e.key === 'Escape') onClose() }
+    const handleKey = (e) => {
+      if (e.key === 'Escape' && !isBusy) onClose()
+    }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
-  }, [onClose])
+  }, [onClose, isBusy])
+
+  useEffect(() => () => {
+    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
+  }, [])
 
   const handleSearch = (value) => {
     setQuery(value)
@@ -47,27 +50,32 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
   }
 
   const clearAttachment = () => {
-    if (attachment?.preview) URL.revokeObjectURL(attachment.preview)
+    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
+    previewUrlRef.current = null
     setAttachment(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
-  const handleFilePick = (e) => {
-    const file = e.target.files?.[0]
-    e.target.value = ''
+  const handleFilePick = (event) => {
+    const file = event.currentTarget.files?.[0]
     if (!file) return
 
     const kind = classifyFile(file.type || 'application/octet-stream')
-    if (attachment?.preview) URL.revokeObjectURL(attachment.preview)
+    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
 
-    // Defer one microtask so post-picker browser click events finish first
-    Promise.resolve().then(() => {
-      setAttachment({
-        file,
-        kind,
-        // Only create object URL for images with known size
-        preview: kind === 'image' && file.size > 0 ? URL.createObjectURL(file) : null,
-      })
-    })
+    // Preserve the Android content-backed File synchronously and keep the
+    // native input populated until Remove/success. Clearing input.value before
+    // this point can revoke access to a lazy content:// URI.
+    let preview = null
+    if (kind === 'image') {
+      try {
+        preview = URL.createObjectURL(file)
+      } catch {
+        // The file remains sendable and falls back to the FileCard preview.
+      }
+    }
+    previewUrlRef.current = preview
+    setAttachment({ file, kind, preview })
   }
 
   const selectUser = (u) => {
@@ -85,40 +93,13 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
     let fileData = null
 
     if (attachment) {
-      if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) {
-        toast('Upload not configured', 'error')
-        return
-      }
-
       setUploading(true)
       try {
-        const formData = new FormData()
-        formData.append('file', attachment.file)
-        formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET)
-        formData.append('folder', `volt/${userId}`)
-
-        // Direct fetch — same approach as the original working code
-        const res = await fetch(
-          `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`,
-          { method: 'POST', body: formData }
-        )
-        const uploaded = await res.json()
-
-        if (!res.ok) {
-          toast(`Upload failed: ${uploaded?.error?.message || res.status}`, 'error')
-          return
-        }
-
+        fileData = await uploadFile(attachment.file, { userId })
         type = attachment.kind
-        fileData = {
-          secure_url: uploaded.secure_url,
-          name: attachment.file.name || `file-${Date.now()}`,
-          bytes: uploaded.bytes ?? attachment.file.size,
-          mime: attachment.file.type || 'application/octet-stream',
-        }
         finalContent = null
       } catch (err) {
-        toast(`Upload failed: ${err.message}`, 'error')
+        toast(err instanceof SizeError ? err.message : `Upload failed: ${err.message}`, 'error')
         return
       } finally {
         setUploading(false)
@@ -128,18 +109,20 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
     }
 
     const success = await sendTo(selectedUser.id, type, finalContent, fileData)
-    if (success) onClose()
+    if (success) {
+      clearAttachment()
+      onClose()
+    }
   }
 
   const isContact = (id) => contacts?.some((c) => c.id === id)
-  const isBusy = sending || uploading
 
   return (
     <div className="confirm-overlay">
       <div className="send-composer">
         <div className="send-header">
           <h3>Send to</h3>
-          <button className="send-close" onClick={onClose} aria-label="Close">
+          <button className="send-close" onClick={onClose} aria-label="Close" disabled={isBusy}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
             </svg>
@@ -151,12 +134,12 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
             attachment.kind === 'image' && attachment.preview ? (
               <div className="send-image-preview">
                 <img src={attachment.preview} alt="To send" />
-                <button onClick={clearAttachment} className="send-remove-image">Remove</button>
+                <button onClick={clearAttachment} className="send-remove-image" disabled={isBusy}>Remove</button>
               </div>
             ) : (
               <div className="send-file-preview">
                 <FileCard kind={attachment.kind} name={attachment.file.name} size={attachment.file.size} />
-                <button onClick={clearAttachment} className="send-remove-image">Remove</button>
+                <button onClick={clearAttachment} className="send-remove-image" disabled={isBusy}>Remove</button>
               </div>
             )
           ) : (
@@ -170,15 +153,26 @@ export default function SendComposer({ onClose, searchUsers, sendTo, sending, us
             />
           )}
           {!attachment && (
-            <label htmlFor={FILE_INPUT_ID} className="send-attach" style={{ cursor: 'pointer' }}>
+            <label
+              htmlFor={FILE_INPUT_ID}
+              className="send-attach"
+              aria-disabled={isBusy}
+              style={{
+                cursor: isBusy ? 'not-allowed' : 'pointer',
+                pointerEvents: isBusy ? 'none' : 'auto',
+                opacity: isBusy ? 0.5 : 1,
+              }}
+            >
               <IconUpload width="14" height="14" /> Attach
             </label>
           )}
           <input
+            ref={fileInputRef}
             id={FILE_INPUT_ID}
             type="file"
             accept={ACCEPT}
             onChange={handleFilePick}
+            disabled={isBusy}
             hidden
             aria-hidden="true"
           />

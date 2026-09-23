@@ -3,7 +3,8 @@ import { supabase } from '../lib/supabaseClient'
 import { toast } from '../components/ui/toastStore'
 import { trackEvent } from '../lib/analytics'
 import { checkRateLimit } from '../lib/rateLimit'
-import { classifyFile } from '../lib/fileType'
+import { uploadFile, SizeError } from '../lib/uploadFile'
+import { classifyFile, validateFile, SIZE_LIMITS } from '../lib/fileType'
 
 const SUPABASE_BUCKET = 'clips'
 const CLOUDINARY_CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
@@ -240,6 +241,20 @@ export function useClips(user) {
       return
     }
 
+    // Android content providers may report size=0 while the selected File is
+    // still valid. Enforce limits only when a positive size is known; the
+    // upload service also validates the server-bound file.
+    if (file.size > 0) {
+      const check = validateFile({ type: file.type || 'application/octet-stream', size: file.size })
+      if (!check.ok) {
+        toast(
+          `File exceeds the ${check.limit === SIZE_LIMITS.audio ? '10' : '15'} MB limit`,
+          'error'
+        )
+        return
+      }
+    }
+
     if (!checkRateLimit('save', 5, 10000)) {
       toast('Slow down — too many saves at once', 'error')
       return
@@ -269,35 +284,22 @@ export function useClips(user) {
     setClips((prev) => sortClips([optimistic, ...prev]))
 
     try {
-      // Direct fetch to Cloudinary — bypasses the uploadFile helper which
-      // uses XHR + validateFile. Direct fetch works reliably on Android mobile
-      // where XHR and file.size===0 can cause silent failures.
-      const formData = new FormData()
-      formData.append('file', file)
-      formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET)
-      formData.append('folder', `volt/${user.id}`)
-
-      const res = await fetch(
-        `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`,
-        { method: 'POST', body: formData }
-      )
-      const uploaded = await res.json()
-
-      if (!res.ok) {
-        throw new Error(uploaded?.error?.message || `Upload failed (${res.status})`)
-      }
+      const descriptor = await uploadFile(file, {
+        userId: user.id,
+        onProgress: setUploadProgress,
+      })
 
       const insertData = {
         user_id: user.id,
         type,
         metadata: {
           provider: 'cloudinary',
-          secure_url: uploaded.secure_url,
-          resource_type: uploaded.resource_type,
-          bytes: uploaded.bytes,
-          format: uploaded.format,
-          mime: file.type || 'application/octet-stream',
-          name: file.name || `file-${Date.now()}`,
+          secure_url: descriptor.secure_url,
+          resource_type: descriptor.resource_type,
+          bytes: descriptor.bytes,
+          format: descriptor.format,
+          mime: descriptor.mime,
+          name: descriptor.name,
         },
       }
       if (options.expiresAt) insertData.expires_at = options.expiresAt
@@ -310,7 +312,7 @@ export function useClips(user) {
       trackEvent(type === 'image' ? 'save_image' : 'save_file')
     } catch (err) {
       setClips((prev) => prev.filter((c) => c.id !== optimisticId))
-      toast(`Upload error: ${err.message}`, 'error')
+      toast(err instanceof SizeError ? err.message : `Upload error: ${err.message}`, 'error')
       console.error('Could not save file:', err.message)
     } finally {
       setSaving(false)

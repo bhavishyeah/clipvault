@@ -6,8 +6,9 @@
 // Validates: Requirements 1.6, 1.7
 //
 // saveFile(file, options) must:
-//   - run validateFile FIRST (toast + early return on failure; NO upload and
-//     NO clip insert on an oversize/empty file — Req 1.6)
+//   - reject known oversize files before upload (Req 1.6)
+//   - allow size-zero Android content-provider files through as unknown-size
+//     inputs while their native input still owns the content URI
 //   - on upload failure, roll back the optimistic entry and store nothing
 //     (Req 1.7)
 //   - on insert failure, roll back the optimistic entry and store nothing
@@ -150,19 +151,30 @@ describe('useClips.saveFile — validation and error paths', () => {
     expect(result.current.clips).toHaveLength(0)
   })
 
-  it('rejects an empty file: toasts, never uploads, never inserts', async () => {
-    const { result } = await mountHook()
-
-    const empty = { type: 'application/pdf', size: 0, name: 'empty.pdf' }
-
-    await act(async () => {
-      await result.current.saveFile(empty)
+  it('accepts a size-zero Android provider file as unknown size', async () => {
+    uploadFile.mockResolvedValueOnce({
+      secure_url: 'https://res.cloudinary.com/test/mobile.pdf',
+      resource_type: 'raw',
+      bytes: 2048,
+      format: 'pdf',
+      mime: 'application/pdf',
+      name: 'mobile.pdf',
     })
 
-    expect(toast).toHaveBeenCalledWith(expect.stringMatching(/empty/i), 'error')
-    expect(uploadFile).not.toHaveBeenCalled()
-    expect(insertSpy).not.toHaveBeenCalled()
-    expect(result.current.clips).toHaveLength(0)
+    const { result } = await mountHook()
+    const mobileFile = { type: 'application/pdf', size: 0, name: 'mobile.pdf' }
+
+    await act(async () => {
+      await result.current.saveFile(mobileFile)
+    })
+
+    expect(uploadFile).toHaveBeenCalledWith(
+      mobileFile,
+      expect.objectContaining({ userId: 'u1' }),
+    )
+    expect(insertSpy).toHaveBeenCalledTimes(1)
+    expect(toast).toHaveBeenCalledWith('File saved')
+    expect(result.current.clips).toHaveLength(1)
   })
 
   it('rolls back and stores nothing when the upload fails (Req 1.7)', async () => {
@@ -179,7 +191,7 @@ describe('useClips.saveFile — validation and error paths', () => {
     // Upload was attempted, but the insert must NOT be reached.
     expect(uploadFile).toHaveBeenCalledTimes(1)
     expect(insertSpy).not.toHaveBeenCalled()
-    expect(toast).toHaveBeenCalledWith(expect.stringMatching(/failed to upload/i), 'error')
+    expect(toast).toHaveBeenCalledWith(expect.stringMatching(/upload error|network error|insert denied/i), 'error')
     // Optimistic entry rolled back — nothing retained.
     expect(result.current.clips).toHaveLength(0)
   })
@@ -205,7 +217,7 @@ describe('useClips.saveFile — validation and error paths', () => {
 
     expect(uploadFile).toHaveBeenCalledTimes(1)
     expect(insertSpy).toHaveBeenCalledTimes(1)
-    expect(toast).toHaveBeenCalledWith(expect.stringMatching(/failed to upload/i), 'error')
+    expect(toast).toHaveBeenCalledWith(expect.stringMatching(/upload error|network error|insert denied/i), 'error')
     // Rollback: the optimistic clip is removed on insert failure.
     expect(result.current.clips).toHaveLength(0)
   })

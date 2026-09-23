@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { IconUpload } from '../ui/Icons'
 import { toast } from '../ui/toastStore'
 import FileCard from '../ui/FileCard'
@@ -29,8 +29,7 @@ import { classifyFile } from '../../lib/fileType'
 
 const isUrl = (text) => /^(https?:\/\/)?[\w.-]+\.[a-z]{2,}([/?#].*)?$/i.test(text)
 
-// Broadened picker scope: images, audio, and common document types. Selections
-// are still gated by `validateFile` in the pick handler.
+// Broad picker scope for images, audio, and common document types.
 const ACCEPT = 'image/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip'
 const GROUP_FILE_INPUT_ID = 'group-send-file-input'
 
@@ -47,13 +46,21 @@ export default function GroupSendPanel({
   const [content, setContent] = useState('')
   const [attachment, setAttachment] = useState(null)
   const [sending, setSending] = useState(false)
+  const fileInputRef = useRef(null)
+  const previewUrlRef = useRef(null)
 
-  // Close on Escape — safe on all platforms
+  // Close on Escape only when no send/upload is using the selected file.
   useEffect(() => {
-    const handleKey = (e) => { if (e.key === 'Escape') onClose() }
+    const handleKey = (e) => {
+      if (e.key === 'Escape' && !sending) onClose()
+    }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
-  }, [onClose])
+  }, [onClose, sending])
+
+  useEffect(() => () => {
+    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
+  }, [])
 
   // Resolve a group's member count from the injected map (preferred) or the
   // group object's own memberCount; undefined when unknown so we can omit it.
@@ -66,10 +73,10 @@ export default function GroupSendPanel({
   const selectedCount = selectedGroup ? countFor(selectedGroup) ?? 0 : 0
 
   const clearAttachment = () => {
-    setAttachment((prev) => {
-      if (prev?.preview) URL.revokeObjectURL(prev.preview)
-      return null
-    })
+    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
+    previewUrlRef.current = null
+    setAttachment(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
   const backToList = () => {
@@ -78,21 +85,26 @@ export default function GroupSendPanel({
     setSelectedGroup(null)
   }
 
-  const handleFilePick = (e) => {
-    const file = e.target.files?.[0]
-    e.target.value = ''
+  const handleFilePick = (event) => {
+    const file = event.currentTarget.files?.[0]
     if (!file) return
 
     const kind = classifyFile(file.type || 'application/octet-stream')
-    if (attachment?.preview) URL.revokeObjectURL(attachment.preview)
+    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
 
-    const newAttachment = {
-      file,
-      kind,
-      preview: kind === 'image' && file.size > 0 ? URL.createObjectURL(file) : null,
+    let preview = null
+    if (kind === 'image') {
+      try {
+        preview = URL.createObjectURL(file)
+      } catch {
+        // The file remains sendable and falls back to the FileCard preview.
+      }
     }
 
-    Promise.resolve().then(() => setAttachment(newAttachment))
+    previewUrlRef.current = preview
+    // Preserve the selected File synchronously; do not clear the owning input
+    // until Remove/success, because Android content:// access can be lazy.
+    setAttachment({ file, kind, preview })
   }
 
   const handleSend = async () => {
@@ -148,7 +160,7 @@ export default function GroupSendPanel({
           <>
             <div className="send-header">
               <h3 id="group-send-title">Send to group</h3>
-              <button className="send-close" title="Close" onClick={onClose}>
+              <button className="send-close" title="Close" onClick={onClose} disabled={sending}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
@@ -206,10 +218,11 @@ export default function GroupSendPanel({
                 className="group-send-back"
                 onClick={backToList}
                 aria-label="Back to group list"
+                disabled={sending}
               >
                 ← {selectedGroup.name}
               </button>
-              <button className="send-close" title="Close" onClick={onClose}>
+              <button className="send-close" title="Close" onClick={onClose} disabled={sending}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
@@ -218,15 +231,15 @@ export default function GroupSendPanel({
 
             <div className="send-content-area">
               {attachment ? (
-                attachment.kind === 'image' ? (
+                attachment.kind === 'image' && attachment.preview ? (
                   <div className="send-image-preview">
                     <img src={attachment.preview} alt="To send" />
-                    <button onClick={clearAttachment} className="send-remove-image">Remove</button>
+                    <button onClick={clearAttachment} className="send-remove-image" disabled={sending}>Remove</button>
                   </div>
                 ) : (
                   <div className="send-file-preview">
                     <FileCard kind={attachment.kind} name={attachment.file.name} size={attachment.file.size} />
-                    <button onClick={clearAttachment} className="send-remove-image">Remove</button>
+                    <button onClick={clearAttachment} className="send-remove-image" disabled={sending}>Remove</button>
                   </div>
                 )
               ) : (
@@ -240,11 +253,20 @@ export default function GroupSendPanel({
                 />
               )}
               {!attachment && (
-                <label htmlFor={GROUP_FILE_INPUT_ID} className="send-attach" style={{ cursor: 'pointer' }}>
+                <label
+                  htmlFor={GROUP_FILE_INPUT_ID}
+                  className="send-attach"
+                  aria-disabled={sending}
+                  style={{
+                    cursor: sending ? 'not-allowed' : 'pointer',
+                    pointerEvents: sending ? 'none' : 'auto',
+                    opacity: sending ? 0.5 : 1,
+                  }}
+                >
                   <IconUpload width="14" height="14" /> Attach
                 </label>
               )}
-              <input id={GROUP_FILE_INPUT_ID} type="file" accept={ACCEPT} onChange={handleFilePick} hidden aria-hidden="true" />
+              <input ref={fileInputRef} id={GROUP_FILE_INPUT_ID} type="file" accept={ACCEPT} onChange={handleFilePick} disabled={sending} hidden aria-hidden="true" />
             </div>
 
             <button
