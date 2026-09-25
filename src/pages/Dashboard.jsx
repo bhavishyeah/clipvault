@@ -29,6 +29,7 @@ import {
   IconInfinity, IconCheck, IconClipboard,
 } from '../components/ui/Icons'
 import { trackEvent } from '../lib/analytics'
+import { parseShare } from '../lib/shareTarget'
 import './Dashboard.css'
 
 const formatDate = (value) =>
@@ -128,7 +129,7 @@ function DesktopPasteInput({ onSave, saving, clips }) {
 export default function Dashboard({ user, profile }) {
   const {
     clips, loading, saving, uploadProgress,
-    saveText, saveFile, saveImage, removeClip, togglePin, editClip, setExpiration, reorderPins,
+    saveText, saveFile, saveImage, saveImageFromUrl, removeClip, togglePin, editClip, setExpiration, reorderPins,
   } = useClips(user)
 
   const { theme, toggleTheme } = useTheme()
@@ -200,13 +201,25 @@ export default function Dashboard({ user, profile }) {
   useEffect(() => {
     if (shareHandled.current) return
     shareHandled.current = true
-    const params = new URLSearchParams(window.location.search)
-    const content = params.get('url') || params.get('text') || params.get('title')
-    if (content) {
-      window.setTimeout(() => { saveText(content); toast('Shared content saved') }, 500)
+
+    // Web Share Target: Android's share sheet lands here (/?share=1&...). Route
+    // by content shape — an image link/data-URI becomes a real image clip via
+    // Cloudinary ingest, everything else a text/link clip. parseShare is the
+    // single source of truth for that decision (lib/shareTarget).
+    const intent = parseShare(window.location.search)
+    if (intent) {
+      window.setTimeout(() => {
+        if (intent.kind === 'image') {
+          saveImageFromUrl(intent.value)
+          toast('Shared image saved')
+        } else {
+          saveText(intent.value)
+          toast('Shared content saved')
+        }
+      }, 500)
       window.history.replaceState({}, '', '/')
     }
-  }, [saveText])
+  }, [saveText, saveImageFromUrl])
 
   const handleSearchChange = (e) => {
     const value = e.target.value

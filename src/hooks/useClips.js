@@ -343,6 +343,74 @@ export function useClips(user) {
     return saveFile(file, options)
   }, [saveFile])
 
+  // --- Save an image from a URL or data: URI (share target / captured link) ---
+  // The Web Share Target and pasted image links deliver an image "by reference"
+  // (an http(s) image URL or a data:image URI) rather than a File. Cloudinary's
+  // unsigned upload fetches/decodes such a string server-side, so uploadFile
+  // accepts it directly. The result is a real, owned image clip — identical in
+  // shape to saveFile's — not a brittle link clip.
+  const saveImageFromUrl = useCallback(async (imageRef, options = {}) => {
+    if (!imageRef || !user) return
+
+    if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) {
+      toast('Upload not configured', 'error')
+      return
+    }
+
+    if (!checkRateLimit('save', 5, 10000)) {
+      toast('Slow down — too many saves at once', 'error')
+      return
+    }
+
+    const optimisticId = `temp-${Date.now()}`
+    const optimistic = {
+      id: optimisticId,
+      user_id: user.id,
+      type: 'image',
+      content: null,
+      metadata: { provider: 'cloudinary', secure_url: null },
+      is_pinned: false,
+      expires_at: options.expiresAt || null,
+      created_at: new Date().toISOString(),
+    }
+
+    setSaving(true)
+    setUploadProgress(0)
+    setClips((prev) => sortClips([optimistic, ...prev]))
+
+    try {
+      const descriptor = await uploadFile(imageRef, { userId: user.id })
+
+      const insertData = {
+        user_id: user.id,
+        type: 'image',
+        metadata: {
+          provider: 'cloudinary',
+          secure_url: descriptor.secure_url,
+          resource_type: descriptor.resource_type,
+          bytes: descriptor.bytes,
+          format: descriptor.format,
+          mime: descriptor.mime,
+          name: options.name || descriptor.name || `shared-image-${Date.now()}`,
+        },
+      }
+      if (options.expiresAt) insertData.expires_at = options.expiresAt
+
+      const { error } = await supabase.from('clips').insert(insertData)
+      if (error) throw new Error(error.message)
+
+      toast('Image saved')
+      trackEvent('save_image')
+    } catch (err) {
+      setClips((prev) => prev.filter((c) => c.id !== optimisticId))
+      toast(`Could not save image: ${err.message}`, 'error')
+      console.error('Could not save image from url:', err.message)
+    } finally {
+      setSaving(false)
+      setUploadProgress(0)
+    }
+  }, [user])
+
   // --- Remove clip (optimistic) ---
   const removeClip = useCallback(async (clip) => {
     setClips((prev) => prev.filter((c) => c.id !== clip.id))
@@ -460,6 +528,7 @@ export function useClips(user) {
     saveText,
     saveFile,
     saveImage,
+    saveImageFromUrl,
     removeClip,
     togglePin,
     editClip,
