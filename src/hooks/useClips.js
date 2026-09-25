@@ -492,6 +492,58 @@ export function useClips(user) {
     }
   }, [])
 
+  // --- Set tags on an existing clip ---
+  // Tags live in `clips.metadata.tags` (no schema migration). The new tag list
+  // is merged into the clip's existing metadata so unrelated metadata keys
+  // (provider/secure_url/mime/preview/…) are preserved. Uses the same
+  // optimistic-update / rollback-on-error pattern as setExpiration. Tags are
+  // owner-private metadata; RLS on `clips` already scopes reads to the owner.
+  const setTags = useCallback(async (clip, tags) => {
+    const nextTags = Array.isArray(tags) ? tags : []
+    const nextMetadata = { ...(clip.metadata ?? {}), tags: nextTags }
+    const updated = { ...clip, metadata: nextMetadata }
+
+    setClips((prev) => prev.map((c) => (c.id === clip.id ? updated : c)))
+
+    const { error } = await supabase
+      .from('clips')
+      .update({ metadata: nextMetadata })
+      .eq('id', clip.id)
+
+    if (error) {
+      setClips((prev) => prev.map((c) => (c.id === clip.id ? clip : c)))
+      toast('Failed to update tags', 'error')
+      console.error('Could not update tags:', error.message)
+    }
+  }, [])
+
+  // --- Cache a fetched link preview on an existing clip ---
+  // Rich link previews (title/description/image) live in
+  // `clips.metadata.preview` (no schema migration — Req 4.2). The preview is
+  // merged into the clip's existing metadata so unrelated keys (tags/provider/
+  // secure_url/…) are preserved. Unlike setTags/setExpiration this write is
+  // best-effort background caching triggered on first view of a link clip: it
+  // updates local state so the card re-renders with the preview, but on a
+  // persistence error it silently keeps the local (in-memory) preview and does
+  // NOT toast or roll back — a failed cache write must never disrupt the vault
+  // (the preview simply re-fetches on a later view). RLS scopes the update to
+  // the owner.
+  const setPreview = useCallback(async (clip, preview) => {
+    const nextMetadata = { ...(clip.metadata ?? {}), preview }
+    const updated = { ...clip, metadata: nextMetadata }
+
+    setClips((prev) => prev.map((c) => (c.id === clip.id ? updated : c)))
+
+    const { error } = await supabase
+      .from('clips')
+      .update({ metadata: nextMetadata })
+      .eq('id', clip.id)
+
+    if (error) {
+      console.error('Could not cache link preview:', error.message)
+    }
+  }, [])
+
   // --- Reorder pinned clips (drag-and-drop) ---
   const reorderPins = useCallback(async (reorderedPinnedClips) => {
     // Optimistic: apply new order immediately
@@ -533,6 +585,8 @@ export function useClips(user) {
     togglePin,
     editClip,
     setExpiration,
+    setTags,
+    setPreview,
     reorderPins,
     refresh,
   }

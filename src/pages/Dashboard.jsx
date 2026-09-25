@@ -7,6 +7,7 @@ import { usePresence } from '../hooks/usePresence'
 import { useDirectSend } from '../hooks/useDirectSend'
 import { useGroups } from '../hooks/useGroups'
 import { useShares } from '../hooks/useShares'
+import { fetchLinkPreview } from '../lib/fetchLinkPreview'
 import PasteZone from '../components/clips/PasteZone'
 import MobilePasteBox from '../components/clips/MobilePasteBox'
 import ImageUpload from '../components/clips/ImageUpload'
@@ -15,7 +16,10 @@ import ToastContainer from '../components/ui/Toast'
 import { toast } from '../components/ui/toastStore'
 import ConfirmModal from '../components/ui/ConfirmModal'
 import EditModal from '../components/ui/EditModal'
+import CommandPalette from '../components/ui/CommandPalette'
+import QrModal from '../components/clips/QrModal'
 import ClipBody from '../components/clips/ClipBody'
+import TagEditor from '../components/clips/TagEditor'
 import SendComposer from '../components/send/SendComposer'
 import IncomingTransfers from '../components/send/IncomingTransfers'
 import GroupSendPanel from '../components/send/GroupSendPanel'
@@ -23,15 +27,36 @@ import GroupCreateModal from '../components/groups/GroupCreateModal'
 import MemberList from '../components/groups/MemberList'
 import AddMemberModal from '../components/groups/AddMemberModal'
 import SecuritySettings from '../components/auth/SecuritySettings'
+import InsightsPanel from '../components/insights/InsightsPanel'
 import {
   IconVault, IconCopy, IconTrash, IconEdit, IconPin, IconPinFilled,
   IconDownload, IconExternalLink, IconSearch, IconImage, IconText, IconLink,
   IconSun, IconMoon, IconLogOut, IconMenu, IconGrip, IconClock,
-  IconInfinity, IconCheck, IconClipboard,
+  IconInfinity, IconCheck, IconClipboard, IconQr,
 } from '../components/ui/Icons'
 import { trackEvent } from '../lib/analytics'
 import { parseShare } from '../lib/shareTarget'
+import { presetToExpiry, formatCountdown, isExpiringSoon } from '../lib/expiry'
+import { matchesClip } from '../lib/search'
 import './Dashboard.css'
+
+// Relative date-window presets for the search toolbar (Req 5.2). Each maps to a
+// lookback duration in ms; 'any' applies no date constraint. The active preset
+// resolves to a `dateFrom` (now - ms) passed into matchesClip.
+const DATE_WINDOWS = [
+  { value: 'any', label: 'Any time', ms: null },
+  { value: '24h', label: 'Last 24h', ms: 24 * 60 * 60 * 1000 },
+  { value: '7d', label: 'Last 7 days', ms: 7 * 24 * 60 * 60 * 1000 },
+  { value: '30d', label: 'Last 30 days', ms: 30 * 24 * 60 * 60 * 1000 },
+]
+
+// Quick expiry presets offered by the per-clip expiry menu (Req 2.1).
+const EXPIRY_MENU = [
+  { preset: '1h', label: '1 hour' },
+  { preset: '1d', label: '1 day' },
+  { preset: '7d', label: '7 days' },
+  { preset: 'none', label: 'No expiry' },
+]
 
 const formatDate = (value) =>
   new Intl.DateTimeFormat('en', {
@@ -130,7 +155,7 @@ function DesktopPasteInput({ onSave, saving, clips }) {
 export default function Dashboard({ user, profile }) {
   const {
     clips, loading, saving, uploadProgress,
-    saveText, saveFile, saveImage, saveImageFromUrl, removeClip, togglePin, editClip, setExpiration, reorderPins,
+    saveText, saveFile, saveImage, saveImageFromUrl, removeClip, togglePin, editClip, setExpiration, setTags, setPreview, reorderPins,
   } = useClips(user)
 
   const { theme, toggleTheme } = useTheme()
@@ -141,6 +166,15 @@ export default function Dashboard({ user, profile }) {
 
   // Which clip's share popover (URL + Revoke) is currently open, if any.
   const [sharePopoverClipId, setSharePopoverClipId] = useState(null)
+
+  // The clip whose QR modal is currently open, if any (A3).
+  const [qrClip, setQrClip] = useState(null)
+
+  // Which clip's expiry preset menu is currently open, if any.
+  const [expiryMenuClipId, setExpiryMenuClipId] = useState(null)
+
+  // Ticking "now" so card countdowns stay live without a per-clip timer.
+  const [now, setNow] = useState(() => Date.now())
 
   // Track online/offline presence
   usePresence(user)
@@ -167,6 +201,9 @@ export default function Dashboard({ user, profile }) {
   // Security settings modal (Feature 2) — mounts SecuritySettings which owns useMfa
   const [showSecurity, setShowSecurity] = useState(false)
 
+  // Usage insights panel (Feature A7) — local-only, PII-free summary
+  const [showInsights, setShowInsights] = useState(false)
+
   const isAnonymous = user.user_metadata?.is_anonymous === true
   const [showConvert, setShowConvert] = useState(false)
   const [convertEmail, setConvertEmail] = useState('')
@@ -177,6 +214,16 @@ export default function Dashboard({ user, profile }) {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState('all')
   const [sortOrder, setSortOrder] = useState('newest')
+  // Relative created-date constraint (see DATE_WINDOWS); 'any' = no constraint.
+  const [dateWindow, setDateWindow] = useState('any')
+  // Active tag filter (Req 1.6); 'all' = no tag constraint. Options derive from
+  // the union of tags across loaded clips (see `availableTags`).
+  const [tagFilter, setTagFilter] = useState('all')
+  // Owner-facing "expiring soon" view filter (Req 2.6). When on, the list is
+  // narrowed to clips whose `expires_at` falls within the soon threshold. This
+  // is a view filter layered on AFTER matchesClip — it never touches the
+  // expired-clip cleanup in useClips (Req 2.7).
+  const [expiringSoonOnly, setExpiringSoonOnly] = useState(false)
   const [editTarget, setEditTarget] = useState(null)
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
@@ -190,11 +237,17 @@ export default function Dashboard({ user, profile }) {
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const shareHandled = useRef(false)
 
+  // Command palette (Ctrl+K) — Req 6. Dashboard owns the open state; the global
+  // Ctrl+K binding opens it and the palette runs actions against existing hooks.
+  const [showPalette, setShowPalette] = useState(false)
+
   useKeyboardShortcuts({
     searchRef: searchInputRef,
+    onOpenPalette: () => setShowPalette(true),
     onEscape: () => {
       setQuery(''); setDebouncedQuery(''); setShowUserMenu(false)
-      setEditTarget(null); setSharePopoverClipId(null)
+      setEditTarget(null); setSharePopoverClipId(null); setExpiryMenuClipId(null); setQrClip(null)
+      setShowPalette(false)
       if (bulkMode) { setBulkMode(false); setSelectedIds(new Set()) }
     },
   })
@@ -213,6 +266,20 @@ export default function Dashboard({ user, profile }) {
     window.addEventListener('click', handleClick)
     return () => window.removeEventListener('click', handleClick)
   }, [sharePopoverClipId])
+
+  // Close the expiry preset menu when clicking outside of it.
+  useEffect(() => {
+    if (!expiryMenuClipId) return
+    const handleClick = (e) => { if (!e.target.closest('.expiry-action-wrap')) setExpiryMenuClipId(null) }
+    window.addEventListener('click', handleClick)
+    return () => window.removeEventListener('click', handleClick)
+  }, [expiryMenuClipId])
+
+  // Keep card countdowns fresh: re-tick "now" once a minute while mounted.
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 60 * 1000)
+    return () => window.clearInterval(id)
+  }, [])
 
   useEffect(() => {
     if (shareHandled.current) return
@@ -296,13 +363,65 @@ export default function Dashboard({ user, profile }) {
     [groupsWithCounts, manageGroupId]
   )
 
+  // Resolve the relative date-window preset to an inclusive lower bound on
+  // created_at (or null for "any time"). Pinned to `now` so it re-derives with
+  // the once-a-minute tick, keeping "last 24h" honest as time passes.
+  const dateFrom = useMemo(() => {
+    const win = DATE_WINDOWS.find((w) => w.value === dateWindow)
+    return win?.ms ? new Date(now - win.ms).toISOString() : undefined
+  }, [dateWindow, now])
+
+  // Union of every tag across loaded clips (Req 1.6), normalized to lowercase
+  // and de-duplicated, sorted for a stable select order. Drives the toolbar tag
+  // filter's options; when empty the control is hidden to avoid clutter.
+  const availableTags = useMemo(() => {
+    const seen = new Set()
+    for (const clip of clips) {
+      const tags = clip.metadata?.tags
+      if (!Array.isArray(tags)) continue
+      for (const raw of tags) {
+        if (typeof raw !== 'string') continue
+        const t = raw.trim().toLowerCase()
+        if (t) seen.add(t)
+      }
+    }
+    return [...seen].sort()
+  }, [clips])
+
+  // Effective tag filter: if the selected tag disappears (clip edited/deleted)
+  // it is treated as "all" so a stale selection never silently hides every
+  // clip. Derived during render — no effect/state-sync needed (Req 1.6).
+  const activeTag = tagFilter !== 'all' && availableTags.includes(tagFilter) ? tagFilter : 'all'
+
   const filteredClips = useMemo(() => {
-    const q = debouncedQuery.trim().toLowerCase()
-    let result = clips.filter((clip) => {
-      const matchesType = filter === 'all' || clip.type === filter
-      const matchesQuery = !q || clip.content?.toLowerCase().includes(q) || clip.metadata?.mime?.toLowerCase().includes(q)
-      return matchesType && matchesQuery
-    })
+    // Search stays CLIENT-SIDE over the already-loaded clip set (Req 5.5). The
+    // vault is small enough that filtering in-memory is instant and never
+    // blocks the UI; if a vault ever grows large enough to warrant it, this is
+    // the single seam to swap in server-side search (Postgres FTS) — the design
+    // deliberately keeps the decision here, not assumed elsewhere.
+    //
+    // `matchesClip` (src/lib/search.js) owns all matching: query tokens across
+    // content + tags + filename/mime + preview text, plus the type, tag, and
+    // created-date-window filters (Req 5.1, 5.2). Passing a filters object keeps
+    // room for the tag filter (task 2.2) and expiring-soon filter (task 3.3) to
+    // layer in here without reshaping the call.
+    let result = clips.filter((clip) =>
+      matchesClip(clip, {
+        query: debouncedQuery,
+        type: filter,
+        tag: activeTag === 'all' ? undefined : activeTag,
+        dateFrom,
+      })
+    )
+
+    // "Expiring soon" view filter (Req 2.6) — layered AFTER matchesClip because
+    // it is an owner-facing view narrowing, not part of the search matcher.
+    // Delegates the threshold decision to isExpiringSoon (task 3.1); pinned to
+    // `now` so it re-derives with the once-a-minute tick. Never mutates or
+    // deletes clips — expired-clip cleanup stays entirely in useClips (Req 2.7).
+    if (expiringSoonOnly) {
+      result = result.filter((clip) => isExpiringSoon(clip.expires_at, now))
+    }
 
     // Sort (pinned always first, then by sortOrder)
     if (sortOrder === 'oldest') {
@@ -319,7 +438,7 @@ export default function Dashboard({ user, profile }) {
     // 'newest' is default from useClips hook
 
     return result
-  }, [clips, filter, debouncedQuery, sortOrder])
+  }, [clips, filter, debouncedQuery, sortOrder, dateFrom, activeTag, expiringSoonOnly, now])
 
   const storageUsage = useMemo(() => calculateStorageUsage(clips), [clips])
 
@@ -432,10 +551,32 @@ export default function Dashboard({ user, profile }) {
 
   const handleEditClick = (clip) => { if (clip.type !== 'image') setEditTarget(clip) }
 
-  const handleSetExpiry = (clip, days) => {
-    if (days === null) { setExpiration(clip, null) }
-    else { const d = new Date(); d.setDate(d.getDate() + days); setExpiration(clip, d.toISOString()) }
+  // Create a share from inside the QR modal (kind 'needs-share' flow). Returns
+  // the created share (or null) so the modal can encode its URL. Reuses the
+  // existing useShares.createShare so the clip card's shared state stays synced.
+  const handleQrCreateShare = useCallback((clip) => createShare(clip), [createShare])
+
+  // Apply a quick expiry preset (1h/1d/7d/none) to a clip. `presetToExpiry`
+  // returns an ISO timestamp for a duration preset, or null for "no expiry"
+  // (which clears any existing expiry).
+  const handleSetExpiry = (clip, preset) => {
+    setExpiration(clip, presetToExpiry(preset))
+    setExpiryMenuClipId(null)
   }
+
+  // First-view link preview fetch (Req 4.1, 4.2). ClipBody calls this once per
+  // link clip that has no cached `metadata.preview`. The scrape runs server-
+  // side (the user's session token never reaches the target site — Req 4.4);
+  // the result is cached on the clip so it is not re-fetched on later views
+  // (Req 4.2). Best-effort: any failure yields an all-null preview which is
+  // still cached, so the card falls back cleanly to favicon+domain (Req 4.5).
+  const handleFetchPreview = useCallback(async (clip) => {
+    const { data } = await supabase.auth.getSession()
+    const accessToken = data?.session?.access_token
+    if (!accessToken) return
+    const preview = await fetchLinkPreview(clip.content, accessToken)
+    setPreview(clip, preview)
+  }, [setPreview])
 
   const toggleSelect = (id) => setSelectedIds((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
   const selectAll = () => setSelectedIds(new Set(filteredClips.map((c) => c.id)))
@@ -577,9 +718,28 @@ export default function Dashboard({ user, profile }) {
     return <IconText />
   }
 
-  // Empty state messages per filter
+  // Empty state messages (Req 5.4). When any search/filter is active, the empty
+  // state names exactly what was searched and which constraints are applied so
+  // "no results" is never mistaken for an empty vault. When nothing is active,
+  // fall back to the per-type "empty vault" copy.
   const getEmptyMessage = () => {
-    if (query) return { title: 'No results', desc: 'Try a different search term.' }
+    const trimmedQuery = query.trim()
+    const dateLabel = DATE_WINDOWS.find((w) => w.value === dateWindow && w.value !== 'any')?.label
+    const hasTag = activeTag !== 'all'
+    const hasActiveFilters = Boolean(trimmedQuery) || filter !== 'all' || Boolean(dateLabel) || hasTag
+
+    if (hasActiveFilters) {
+      const parts = []
+      if (trimmedQuery) parts.push(`matching "${trimmedQuery}"`)
+      if (filter !== 'all') parts.push(`of type "${filter}"`)
+      if (hasTag) parts.push(`tagged "#${activeTag}"`)
+      if (dateLabel) parts.push(`from ${dateLabel.toLowerCase()}`)
+      return {
+        title: 'No matching clips',
+        desc: `No clips ${parts.join(' ')}. Try adjusting your search or filters.`,
+      }
+    }
+
     switch (filter) {
       case 'text': return { title: 'No text clips', desc: 'Save some text to see it here.' }
       case 'link': return { title: 'No links saved', desc: 'Paste a URL to save it.' }
@@ -618,6 +778,7 @@ export default function Dashboard({ user, profile }) {
                     <span>{storageUsage.imageCount} images</span>
                   </div>
                   <button onClick={exportVault}>Export vault</button>
+                  <button onClick={() => { setShowInsights(true); setShowUserMenu(false) }}>Usage insights</button>
                   {!isAnonymous && (
                     <button onClick={() => { setShowSecurity(true); setShowUserMenu(false) }}>Security &amp; 2FA</button>
                   )}
@@ -692,11 +853,46 @@ export default function Dashboard({ user, profile }) {
                 </button>
               ))}
             </div>
+            <select
+              className="sort-select date-window-select"
+              value={dateWindow}
+              onChange={(e) => setDateWindow(e.target.value)}
+              title="Filter by when a clip was saved"
+              aria-label="Filter by date saved"
+            >
+              {DATE_WINDOWS.map((w) => (
+                <option key={w.value} value={w.value}>{w.label}</option>
+              ))}
+            </select>
+            {availableTags.length > 0 && (
+              <select
+                className="sort-select tag-filter-select"
+                value={activeTag}
+                onChange={(e) => setTagFilter(e.target.value)}
+                title="Filter by tag"
+                aria-label="Filter by tag"
+              >
+                <option value="all">All tags</option>
+                {availableTags.map((tag) => (
+                  <option key={tag} value={tag}>#{tag}</option>
+                ))}
+              </select>
+            )}
             <select className="sort-select" value={sortOrder} onChange={(e) => setSortOrder(e.target.value)}>
               <option value="newest">Newest</option>
               <option value="oldest">Oldest</option>
               <option value="alpha">A-Z</option>
             </select>
+            <button
+              type="button"
+              className={`bulk-toggle expiring-soon-toggle ${expiringSoonOnly ? 'active' : ''}`}
+              onClick={() => setExpiringSoonOnly((v) => !v)}
+              title="Show only expiring-soon clips"
+              aria-pressed={expiringSoonOnly}
+              aria-label="Show only expiring-soon clips"
+            >
+              <IconClock />
+            </button>
             <button className={`bulk-toggle ${bulkMode ? 'active' : ''}`} onClick={() => { setBulkMode(!bulkMode); setSelectedIds(new Set()) }} title="Select multiple">
               <IconCheck />
             </button>
@@ -732,20 +928,33 @@ export default function Dashboard({ user, profile }) {
                   <span className="type-pill"><span className="type-symbol">{getTypeIcon(clip.type)}</span>{clip.type}</span>
                   <div className="clip-card-top-actions">
                     {getShare(clip.id) && <span className="shared-badge" title="Shared publicly"><IconLink /></span>}
-                    {clip.expires_at && <span className="expiry-badge" title={`Expires ${formatDate(clip.expires_at)}`}><IconClock /></span>}
+                    {clip.expires_at && (
+                      <span
+                        className={`expiry-badge ${isExpiringSoon(clip.expires_at, now) ? 'expiring-soon' : ''}`}
+                        title={`Expires ${formatDate(clip.expires_at)}`}
+                      >
+                        <IconClock />
+                        <span className="expiry-countdown">{formatCountdown(clip.expires_at, now)}</span>
+                      </span>
+                    )}
                     <button className={`pin-button ${clip.is_pinned ? 'pinned' : ''}`} title={clip.is_pinned ? 'Unpin' : 'Pin'} onClick={(e) => { e.stopPropagation(); togglePin(clip) }}>
                       {clip.is_pinned ? <IconPinFilled /> : <IconPin />}
                     </button>
                   </div>
                 </div>
 
-                <ClipBody clip={clip} />
+                <ClipBody clip={clip} onFetchPreview={handleFetchPreview} />
+
+                {!bulkMode && (
+                  <TagEditor tags={clip.metadata?.tags} onChange={(next) => setTags(clip, next)} />
+                )}
 
                 {!bulkMode && (
                   <div className="clip-card-bottom">
                     <time>{formatDate(clip.created_at)}</time>
                     <div className="clip-actions">
                       <button onClick={() => copyClip(clip)} title="Copy"><IconCopy /></button>
+                      <button onClick={() => setQrClip(clip)} title="Show QR code" aria-label="Show QR code"><IconQr /></button>
                       {clip.type !== 'image' && <button onClick={() => handleEditClick(clip)} title="Edit"><IconEdit /></button>}
                       {clip.type === 'link' && <button onClick={() => openLink(clip.content)} title="Open"><IconExternalLink /></button>}
                       {(clip.type === 'image' || clip.type === 'file' || clip.type === 'audio') && <button onClick={() => downloadClip(clip)} title="Download"><IconDownload /></button>}
@@ -775,9 +984,32 @@ export default function Dashboard({ user, profile }) {
                           </div>
                         )}
                       </div>
-                      <button className="expiry-action" onClick={() => handleSetExpiry(clip, clip.expires_at ? null : 7)} title={clip.expires_at ? 'Remove expiry' : 'Expire in 7d'}>
-                        {clip.expires_at ? <IconInfinity /> : <IconClock />}
-                      </button>
+                      <div className="expiry-action-wrap">
+                        <button
+                          className={`expiry-action ${clip.expires_at ? 'has-expiry' : ''}`}
+                          onClick={() => setExpiryMenuClipId((prev) => (prev === clip.id ? null : clip.id))}
+                          title={clip.expires_at ? 'Change expiry' : 'Set expiry'}
+                          aria-haspopup="menu"
+                          aria-expanded={expiryMenuClipId === clip.id}
+                        >
+                          {clip.expires_at ? <IconInfinity /> : <IconClock />}
+                        </button>
+                        {expiryMenuClipId === clip.id && (
+                          <div className="expiry-menu" role="menu" onClick={(e) => e.stopPropagation()}>
+                            <span className="expiry-menu-label">Auto-expire</span>
+                            {EXPIRY_MENU.map(({ preset, label }) => (
+                              <button
+                                key={preset}
+                                role="menuitem"
+                                className="expiry-menu-item"
+                                onClick={() => handleSetExpiry(clip, preset)}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                       <button className="delete-action" onClick={() => handleDeleteClick(clip)} title="Delete"><IconTrash /></button>
                     </div>
                   </div>
@@ -803,6 +1035,14 @@ export default function Dashboard({ user, profile }) {
       <ToastContainer />
       <ConfirmModal open={bulkConfirm} title={`Delete ${selectedIds.size} clips?`} message="All selected clips will be permanently removed." onConfirm={bulkDelete} onCancel={() => setBulkConfirm(false)} />
       <EditModal open={!!editTarget} clip={editTarget} onSave={editClip} onCancel={() => setEditTarget(null)} />
+      <QrModal
+        open={!!qrClip}
+        clip={qrClip}
+        activeShare={qrClip ? getShare(qrClip.id) : null}
+        onCreateShare={handleQrCreateShare}
+        creatingShare={shareBusy}
+        onClose={() => setQrClip(null)}
+      />
 
       {/* Convert anonymous to permanent account */}
       {showConvert && (
@@ -860,6 +1100,20 @@ export default function Dashboard({ user, profile }) {
               </svg>
             </button>
             <SecuritySettings user={user} />
+          </div>
+        </div>
+      )}
+
+      {/* Usage insights — local-only, PII-free vault summary (Feature A7) */}
+      {showInsights && (
+        <div className="confirm-overlay" onClick={() => setShowInsights(false)}>
+          <div className="insights-modal" onClick={(e) => e.stopPropagation()}>
+            <button className="send-close insights-modal-close" title="Close" onClick={() => setShowInsights(false)}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+            <InsightsPanel onClose={() => setShowInsights(false)} />
           </div>
         </div>
       )}
@@ -924,6 +1178,20 @@ export default function Dashboard({ user, profile }) {
         onClose={() => setAddMemberTarget(null)}
         onAdd={handleAddMemberConfirm}
         searchUsers={searchUsers}
+      />
+
+      {/* Command palette (Ctrl+K) — jump to any clip and run any action.
+          Handlers reuse the hooks already wired above (no duplicate state). */}
+      <CommandPalette
+        open={showPalette}
+        onClose={() => setShowPalette(false)}
+        clips={clips}
+        onCopy={copyClip}
+        onTogglePin={togglePin}
+        onShare={handleShareClick}
+        onSend={() => setShowSendComposer(true)}
+        onDelete={handleDeleteClick}
+        onSetExpiry={handleSetExpiry}
       />
     </main>
   )
