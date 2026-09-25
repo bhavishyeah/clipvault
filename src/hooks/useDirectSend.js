@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { toast } from '../components/ui/toastStore'
 import { trackEvent } from '../lib/analytics'
+import { planImageIngest } from '../lib/ingestImage'
+import { uploadFile } from '../lib/uploadFile'
 
 // Pure mapping from an incoming direct-transfer row to the clip insert payload.
 // This is the single source of truth for how a saved-to-vault clip is shaped:
@@ -276,19 +278,52 @@ export function useDirectSend(user) {
     setIncoming((prev) => prev.filter((t) => t.id !== transferId))
   }, [])
 
-  // Save incoming transfer to vault. The clip payload (type/content/metadata)
-  // is produced by the pure `transferToClip` helper so the file-field mapping
-  // has a single source of truth (Req 5.3, 5.6).
+  // Save incoming transfer to vault.
+  //
+  // Images that arrived "by reference" (the browser extension / share sheet
+  // send an image as a link or data: URI, not an uploaded file) are ingested
+  // into OUR Cloudinary so they become durable, owned image clips instead of
+  // brittle link clips. Everything else uses the pure `transferToClip` mapping,
+  // which remains the single source of truth for file-field mapping.
   const saveToVault = useCallback(async (transfer) => {
+    const plan = planImageIngest(transfer)
+
+    let payload
+    if (plan) {
+      try {
+        const descriptor = await uploadFile(plan.uploadValue, { userId: user.id })
+        payload = {
+          type: 'image',
+          content: null,
+          metadata: {
+            provider: 'cloudinary',
+            secure_url: descriptor.secure_url,
+            resource_type: descriptor.resource_type,
+            bytes: descriptor.bytes,
+            format: descriptor.format,
+            mime: descriptor.mime,
+            name: plan.name,
+          },
+        }
+      } catch (err) {
+        // Ingest failed (hotlink-protected, offline, etc.) — fall back to
+        // saving the original link/text so the user never loses the content.
+        console.error('Image ingest failed, saving as link:', err.message)
+        payload = transferToClip(transfer)
+      }
+    } else {
+      payload = transferToClip(transfer)
+    }
+
     const { error } = await supabase.from('clips').insert({
       user_id: user.id,
-      ...transferToClip(transfer),
+      ...payload,
     })
 
     if (error) {
       toast('Failed to save', 'error')
     } else {
-      toast('Saved to vault')
+      toast(payload.type === 'image' && plan ? 'Image saved to vault' : 'Saved to vault')
       trackEvent('save_from_transfer')
       await markDelivered(transfer.id)
     }

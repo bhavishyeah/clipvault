@@ -5,3 +5,8 @@ dist/
 .env.*.local
 *.log
 .DS_Store
+
+# Internal / agent artifacts (not part of the app)
+.kiro/
+semantic-review/
+DOCUMENTATION.md
