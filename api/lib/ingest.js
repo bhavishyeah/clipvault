@@ -129,3 +129,61 @@ export function normalizePayload(body = {}) {
   const type = isUrl(content) ? 'link' : 'text'
   return { ok: true, payload: { type, content, imageUpload: null, groupName } }
 }
+
+/**
+ * @typedef {Object} FileDescriptor
+ * @property {string} secure_url
+ * @property {string} [name]
+ * @property {number|null} [bytes]
+ * @property {string} [mime]
+ */
+
+/**
+ * Build a single direct_transfers row for one recipient.
+ *
+ * When the payload is an image, the file fields come from `fileDescriptor`
+ * (the result of a SINGLE prior Cloudinary upload) so a group fan-out never
+ * re-uploads per recipient. Text/link payloads leave the file_* columns null.
+ *
+ * @param {Object} args
+ * @param {string} args.senderId
+ * @param {string} args.recipientId
+ * @param {import('./ingest.js').NormalizedPayload} args.payload
+ * @param {string|null} [args.groupName] - overrides payload.groupName when set
+ * @param {FileDescriptor|null} [args.fileDescriptor]
+ * @returns {Object} a direct_transfers row
+ */
+export function buildTransferRow({ senderId, recipientId, payload, groupName, fileDescriptor }) {
+  const isImage = payload.type === 'image' && fileDescriptor
+  return {
+    sender_id: senderId,
+    recipient_id: recipientId,
+    type: isImage ? 'image' : payload.type,
+    content: isImage ? null : payload.content,
+    file_url: isImage ? fileDescriptor.secure_url : null,
+    file_name: isImage ? fileDescriptor.name ?? null : null,
+    file_size: isImage ? fileDescriptor.bytes ?? null : null,
+    mime_type: isImage ? fileDescriptor.mime ?? null : null,
+    group_name: groupName ?? payload.groupName ?? null,
+    status: 'pending',
+  }
+}
+
+/**
+ * Fan a single send out to many recipients: one row per recipient, all sharing
+ * the same file fields (single prior upload) and group name tag. The caller is
+ * responsible for excluding the sender from `recipientIds`.
+ *
+ * @param {Object} args
+ * @param {string} args.senderId
+ * @param {string[]} args.recipientIds
+ * @param {import('./ingest.js').NormalizedPayload} args.payload
+ * @param {string} args.groupName
+ * @param {FileDescriptor|null} [args.fileDescriptor]
+ * @returns {Object[]} direct_transfers rows (one per recipient)
+ */
+export function buildFanoutRows({ senderId, recipientIds, payload, groupName, fileDescriptor }) {
+  return (recipientIds || []).map((recipientId) =>
+    buildTransferRow({ senderId, recipientId, payload, groupName, fileDescriptor }),
+  )
+}

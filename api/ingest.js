@@ -10,10 +10,12 @@
 //
 // Body (JSON):
 //   {
-//     recipient: "@username" | "<uuid>",   // required
+//     recipient: "@username" | "<uuid>",   // single target (required unless group)
+//     group?:    "<groupId>",               // group target; wins over recipient,
+//                                            // fans out to every member (excl. sender)
 //     content?:  string,                    // text, link, image URL, or data:image
 //     imageUrl?: string,                    // explicit image URL / data URI (wins)
-//     groupName?: string                    // optional tag for group fan-out
+//     groupName?: string                    // optional tag (auto-set for group sends)
 //   }
 //
 // Behavior:
@@ -27,7 +29,12 @@
 //     row with sender_id = the authenticated caller.
 
 import { createClient } from '@supabase/supabase-js'
-import { normalizePayload, normalizeRecipient } from './lib/ingest.js'
+import {
+  normalizePayload,
+  normalizeRecipient,
+  buildTransferRow,
+  buildFanoutRows,
+} from './lib/ingest.js'
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL,
@@ -96,10 +103,76 @@ export default async function handler(req, res) {
     }
     const senderId = userData.user.id
 
-    // 2. Resolve the recipient.
+    // 2. Normalize the payload (shared by single and group sends).
+    const normalized = normalizePayload(req.body || {})
+    if (!normalized.ok) return res.status(400).json({ error: normalized.error })
+    const { payload } = normalized
+
+    // 3. If the payload is an image, upload it into our Cloudinary ONCE. The
+    //    resulting descriptor is reused across every fanned-out row so a group
+    //    send never re-uploads per recipient. A remote-URL failure falls back
+    //    to a link; a data: URI failure is fatal (can't be stored as a link).
+    let fileDescriptor = null
+    let effectivePayload = payload
+    if (payload.type === 'image') {
+      try {
+        fileDescriptor = await uploadToCloudinary(payload.imageUpload, senderId)
+      } catch (err) {
+        if (payload.imageUpload.startsWith('data:')) {
+          return res.status(502).json({ error: `Image upload failed: ${err.message}` })
+        }
+        // Degrade to a link so the send is never lost.
+        effectivePayload = { ...payload, type: 'link', content: payload.imageUpload, imageUpload: null }
+      }
+    }
+
+    // 4a. GROUP send — `group` wins over `recipient`. Verify ownership, load
+    //     members, exclude the sender, and fan out one row per member.
+    const groupId = typeof req.body?.group === 'string' ? req.body.group.trim() : ''
+    if (groupId) {
+      const { data: group, error: groupErr } = await supabase
+        .from('groups')
+        .select('id, name, owner_id')
+        .eq('id', groupId)
+        .single()
+
+      if (groupErr || !group) return res.status(404).json({ error: 'Group not found' })
+      if (group.owner_id !== senderId) {
+        return res.status(403).json({ error: 'You do not own this group' })
+      }
+
+      const { data: memberRows, error: memberErr } = await supabase
+        .from('group_members')
+        .select('user_id')
+        .eq('group_id', group.id)
+      if (memberErr) return res.status(500).json({ error: memberErr.message })
+
+      const recipientIds = (memberRows || [])
+        .map((m) => m.user_id)
+        .filter((id) => id !== senderId)
+
+      if (recipientIds.length === 0) {
+        return res.status(200).json({ success: true, recipients: 0 })
+      }
+
+      const rows = buildFanoutRows({
+        senderId,
+        recipientIds,
+        payload: effectivePayload,
+        groupName: group.name,
+        fileDescriptor,
+      })
+
+      const { error: insertError } = await supabase.from('direct_transfers').insert(rows)
+      if (insertError) return res.status(500).json({ error: insertError.message })
+
+      return res.status(200).json({ success: true, recipients: recipientIds.length })
+    }
+
+    // 4b. SINGLE recipient send.
     const recipientRef = normalizeRecipient(req.body?.recipient)
     if (!recipientRef) {
-      return res.status(400).json({ error: 'A valid recipient (@username or id) is required' })
+      return res.status(400).json({ error: 'A valid recipient (@username or id) or group is required' })
     }
 
     let recipientId
@@ -115,47 +188,12 @@ export default async function handler(req, res) {
       recipientId = profile.id
     }
 
-    if (recipientId === senderId) {
-      // Allowed: users can send to themselves (a common capture flow).
-    }
-
-    // 3. Normalize the payload.
-    const normalized = normalizePayload(req.body || {})
-    if (!normalized.ok) return res.status(400).json({ error: normalized.error })
-    const { payload } = normalized
-
-    // 4. Build the transfer row, uploading any image into our Cloudinary.
-    const row = {
-      sender_id: senderId,
-      recipient_id: recipientId,
-      type: payload.type,
-      content: payload.content,
-      file_url: null,
-      file_name: null,
-      file_size: null,
-      mime_type: null,
-      group_name: payload.groupName,
-      status: 'pending',
-    }
-
-    if (payload.type === 'image') {
-      try {
-        const descriptor = await uploadToCloudinary(payload.imageUpload, senderId)
-        row.file_url = descriptor.secure_url
-        row.file_name = descriptor.name
-        row.file_size = descriptor.bytes
-        row.mime_type = descriptor.mime
-        row.content = null
-      } catch (err) {
-        // Fall back to a link so the send is never lost. A data: URI cannot be
-        // stored as a link, so surface a clear error instead.
-        if (payload.imageUpload.startsWith('data:')) {
-          return res.status(502).json({ error: `Image upload failed: ${err.message}` })
-        }
-        row.type = 'link'
-        row.content = payload.imageUpload
-      }
-    }
+    const row = buildTransferRow({
+      senderId,
+      recipientId,
+      payload: effectivePayload,
+      fileDescriptor,
+    })
 
     // 5. Insert the transfer (service role bypasses RLS; sender is attributed).
     const { data: inserted, error: insertError } = await supabase

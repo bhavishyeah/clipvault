@@ -16,6 +16,8 @@ import {
   isImageUrl,
   unwrapImageUrl,
   MAX_CONTENT_LEN,
+  buildTransferRow,
+  buildFanoutRows,
 } from './ingest.js'
 
 const UUID = '11111111-2222-3333-4444-555555555555'
@@ -88,5 +90,58 @@ describe('normalizePayload', () => {
   it('allows an over-long data:image because it is uploaded, not stored', () => {
     const big = `data:image/png;base64,${'A'.repeat(MAX_CONTENT_LEN + 100)}`
     expect(normalizePayload({ content: big }).ok).toBe(true)
+  })
+})
+
+const SENDER = 'sender-id'
+const FILE = { secure_url: 'https://res.cloudinary.com/x/cat.png', name: 'cat.png', bytes: 1234, mime: 'image/png' }
+
+describe('buildTransferRow', () => {
+  it('builds a text row with null file fields', () => {
+    const payload = { type: 'text', content: 'hi', imageUpload: null, groupName: null }
+    const row = buildTransferRow({ senderId: SENDER, recipientId: 'r1', payload })
+    expect(row).toMatchObject({
+      sender_id: SENDER, recipient_id: 'r1', type: 'text', content: 'hi',
+      file_url: null, file_name: null, file_size: null, mime_type: null,
+      group_name: null, status: 'pending',
+    })
+  })
+
+  it('builds an image row from the file descriptor with null content', () => {
+    const payload = { type: 'image', content: null, imageUpload: 'x', groupName: null }
+    const row = buildTransferRow({ senderId: SENDER, recipientId: 'r1', payload, fileDescriptor: FILE })
+    expect(row).toMatchObject({
+      type: 'image', content: null,
+      file_url: FILE.secure_url, file_name: 'cat.png', file_size: 1234, mime_type: 'image/png',
+    })
+  })
+
+  it('lets an explicit groupName override the payload groupName', () => {
+    const payload = { type: 'text', content: 'hi', imageUpload: null, groupName: 'FromPayload' }
+    const row = buildTransferRow({ senderId: SENDER, recipientId: 'r1', payload, groupName: 'Override' })
+    expect(row.group_name).toBe('Override')
+  })
+})
+
+describe('buildFanoutRows', () => {
+  it('produces one row per recipient with a shared file_url and group tag', () => {
+    const payload = { type: 'image', content: null, imageUpload: 'x', groupName: null }
+    const rows = buildFanoutRows({
+      senderId: SENDER,
+      recipientIds: ['a', 'b', 'c'],
+      payload,
+      groupName: 'Team',
+      fileDescriptor: FILE,
+    })
+    expect(rows).toHaveLength(3)
+    expect(rows.map((r) => r.recipient_id)).toEqual(['a', 'b', 'c'])
+    expect(new Set(rows.map((r) => r.file_url))).toEqual(new Set([FILE.secure_url]))
+    expect(rows.every((r) => r.group_name === 'Team')).toBe(true)
+    expect(rows.every((r) => r.sender_id === SENDER && r.type === 'image')).toBe(true)
+  })
+
+  it('returns an empty array for no recipients', () => {
+    const payload = { type: 'text', content: 'hi', imageUpload: null, groupName: null }
+    expect(buildFanoutRows({ senderId: SENDER, recipientIds: [], payload, groupName: 'T' })).toEqual([])
   })
 })
