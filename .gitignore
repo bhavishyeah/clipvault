@@ -10,3 +10,6 @@ dist/
 .kiro/
 semantic-review/
 DOCUMENTATION.md
+
+.vercel
+.env*.local

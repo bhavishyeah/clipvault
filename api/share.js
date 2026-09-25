@@ -19,8 +19,8 @@
 // no-store so a revoke takes effect immediately.
 
 import { createClient } from '@supabase/supabase-js'
-import { generateToken, computeExpiry, isShareActive, presentClip } from './lib/share.js'
-import { rateLimit, clientIp } from './lib/rateLimit.js'
+import { generateToken, computeExpiry, isShareActive, presentClip } from '../lib/share.js'
+import { rateLimit, clientIp } from '../lib/rateLimit.js'
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL,

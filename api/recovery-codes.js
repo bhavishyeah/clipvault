@@ -29,7 +29,7 @@
 // api/lib/recoveryCodes.js (single source of truth, unit- and property-tested).
 
 import { createClient } from '@supabase/supabase-js'
-import { CODE_COUNT, generateCode, normalizeCode, hashCode, matchesHash } from './lib/recoveryCodes.js'
+import { CODE_COUNT, generateCode, normalizeCode, hashCode, matchesHash } from '../lib/recoveryCodes.js'
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL,

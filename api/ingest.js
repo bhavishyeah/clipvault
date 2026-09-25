@@ -34,7 +34,7 @@ import {
   normalizeRecipient,
   buildTransferRow,
   buildFanoutRows,
-} from './lib/ingest.js'
+} from '../lib/ingest.js'
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL,

@@ -1,0 +1,4 @@
+# Test files must never be deployed as Serverless Functions.
+# (Vercel treats every .js under api/ as a function entry point.)
+**/*.test.js
+**/*.spec.js

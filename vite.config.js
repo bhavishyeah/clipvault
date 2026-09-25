@@ -128,7 +128,7 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test/setup.js'],
-    include: ['src/**/*.{test,spec}.{js,jsx}', 'api/**/*.{test,spec}.js'],
+    include: ['src/**/*.{test,spec}.{js,jsx}', 'api/**/*.{test,spec}.js', 'lib/**/*.{test,spec}.js'],
     css: false,
     // The default `forks` pool can hang spawning workers in some sandboxed /
     // Windows environments; `threads` starts reliably.
