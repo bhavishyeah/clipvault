@@ -1,0 +1,135 @@
+/* VOLT — Public share page (/s/:token). Standalone, no dashboard chrome. */
+
+.share-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg, #08090f);
+  color: var(--text, #e7e9f0);
+}
+
+.share-page-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border, #1c1f2a);
+}
+
+.share-brand {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-decoration: none;
+  color: var(--text, #e7e9f0);
+}
+
+.share-page-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.share-card {
+  width: 100%;
+  max-width: 560px;
+  background: var(--surface, #10121a);
+  border: 1px solid var(--border, #1c1f2a);
+  border-radius: 14px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.share-card-status {
+  text-align: center;
+  align-items: center;
+}
+
+.share-card-status h1 {
+  font-size: 20px;
+  margin: 0;
+}
+
+.share-card-status p {
+  color: var(--text-secondary, #9aa0b0);
+  margin: 0;
+}
+
+.share-eyebrow {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted, #6b7180);
+  margin: 0;
+}
+
+.share-image-wrap {
+  border: 1px solid var(--border, #1c1f2a);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #000;
+}
+
+.share-image-wrap img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 70vh;
+  object-fit: contain;
+}
+
+.share-text {
+  margin: 0;
+  padding: 16px;
+  background: var(--bg, #08090f);
+  border: 1px solid var(--border, #1c1f2a);
+  border-radius: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.share-link {
+  color: var(--accent, #7c93ff);
+  word-break: break-all;
+  text-decoration: none;
+}
+
+.share-link:hover { text-decoration: underline; }
+
+.share-actions-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.share-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border, #1c1f2a);
+  background: var(--bg, #08090f);
+  color: var(--text, #e7e9f0);
+  font-size: 14px;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.share-action:hover { border-color: var(--accent, #7c93ff); }
+
+.share-cta {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 10px 18px;
+  border-radius: 10px;
+  background: var(--accent, #7c93ff);
+  color: #08090f;
+  font-weight: 600;
+  text-decoration: none;
+}

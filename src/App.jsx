@@ -9,6 +9,8 @@ import ResetPassword from './components/auth/ResetPassword.jsx'
 import QRConfirmPage from './components/auth/QRConfirmPage.jsx'
 import Onboarding from './components/auth/Onboarding.jsx'
 import MfaChallenge from './components/auth/MfaChallenge.jsx'
+import PublicShare from './components/share/PublicShare.jsx'
+import { sharePathToken } from './lib/share'
 
 function tokenClaim(accessToken, claim) {
   try {
@@ -27,6 +29,11 @@ function sessionAal(session) {
 }
 
 export default function App() {
+  // Public share page: /s/<token> renders a standalone, unauthenticated view
+  // and never mounts the auth/MFA gate or dashboard. Resolved once from the
+  // initial path so the whole auth machinery below is skipped for viewers.
+  const [shareToken] = useState(() => sharePathToken(window.location.pathname))
+
   const [session, setSession] = useState(null)
   // Tracks the authenticated principal independently of render state so
   // same-user TOKEN_REFRESHED / SIGNED_IN events do not tear down Dashboard.
@@ -35,7 +42,9 @@ export default function App() {
   const sessionUserIdRef = useRef(null)
   const sessionRef = useRef(null)
   const [aalCheckVersion, setAalCheckVersion] = useState(0)
-  const [loading, setLoading] = useState(true)
+  // On the public share path there is no session to load, so start un-loaded
+  // and let the effect below skip all auth work entirely.
+  const [loading, setLoading] = useState(() => !shareToken)
   const [showResetForm, setShowResetForm] = useState(false)
   const [profile, setProfile] = useState(undefined) // undefined = not checked, null = no profile, object = has profile
   // Vault access gate (Feature 2): undefined = not checked yet.
@@ -56,6 +65,9 @@ export default function App() {
   const [qrDone, setQrDone] = useState(false)
 
   useEffect(() => {
+    // The public share path skips all auth work; `loading` already starts
+    // false for it, so there is nothing to synchronize here.
+    if (shareToken) return
     trackEvent('session_start')
 
     supabase.auth.getSession().then(({ data }) => {
@@ -110,7 +122,7 @@ export default function App() {
     })
 
     return () => subscription.unsubscribe()
-  }, [])
+  }, [shareToken])
 
   // Check if user has a profile (username set)
   useEffect(() => {
@@ -174,6 +186,11 @@ export default function App() {
     checkAal()
     return () => { cancelled = true }
   }, [sessionUserId, aalCheckVersion])
+
+  // Public share view — standalone, no auth. Checked before everything else.
+  if (shareToken) {
+    return <PublicShare token={shareToken} />
+  }
 
   if (loading) {
     return (
