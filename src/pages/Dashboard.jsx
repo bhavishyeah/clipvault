@@ -6,6 +6,7 @@ import { useTheme } from '../hooks/useTheme'
 import { usePresence } from '../hooks/usePresence'
 import { useDirectSend } from '../hooks/useDirectSend'
 import { useGroups } from '../hooks/useGroups'
+import { useShares } from '../hooks/useShares'
 import PasteZone from '../components/clips/PasteZone'
 import MobilePasteBox from '../components/clips/MobilePasteBox'
 import ImageUpload from '../components/clips/ImageUpload'
@@ -134,6 +135,13 @@ export default function Dashboard({ user, profile }) {
 
   const { theme, toggleTheme } = useTheme()
 
+  // Public share links — owner-scoped create/revoke, active shares loaded on
+  // mount (keyed by clip_id) so cards can show a "shared" indicator.
+  const { getShare, createShare, revokeShare, busy: shareBusy } = useShares(user)
+
+  // Which clip's share popover (URL + Revoke) is currently open, if any.
+  const [sharePopoverClipId, setSharePopoverClipId] = useState(null)
+
   // Track online/offline presence
   usePresence(user)
 
@@ -186,7 +194,7 @@ export default function Dashboard({ user, profile }) {
     searchRef: searchInputRef,
     onEscape: () => {
       setQuery(''); setDebouncedQuery(''); setShowUserMenu(false)
-      setEditTarget(null)
+      setEditTarget(null); setSharePopoverClipId(null)
       if (bulkMode) { setBulkMode(false); setSelectedIds(new Set()) }
     },
   })
@@ -197,6 +205,14 @@ export default function Dashboard({ user, profile }) {
     window.addEventListener('click', handleClick)
     return () => window.removeEventListener('click', handleClick)
   }, [showUserMenu])
+
+  // Close the share popover when clicking outside of it (mirrors user-menu).
+  useEffect(() => {
+    if (!sharePopoverClipId) return
+    const handleClick = (e) => { if (!e.target.closest('.share-action-wrap')) setSharePopoverClipId(null) }
+    window.addEventListener('click', handleClick)
+    return () => window.removeEventListener('click', handleClick)
+  }, [sharePopoverClipId])
 
   useEffect(() => {
     if (shareHandled.current) return
@@ -341,6 +357,51 @@ export default function Dashboard({ user, profile }) {
     const url = /^https?:\/\//i.test(content) ? content : `https://${content}`
     window.open(url, '_blank', 'noopener,noreferrer')
   }, [])
+
+  // --- Public share links ---
+  // Resolve the public URL for a share. Shares loaded from the DB on mount do
+  // not carry `url`, so reconstruct it from the token when absent.
+  const shareUrl = useCallback(
+    (share) => share?.url || (share?.token ? `${window.location.origin}/s/${share.token}` : ''),
+    []
+  )
+
+  // Share action: with no active share, create one and copy the URL; when one
+  // already exists, toggle the URL + Revoke popover.
+  const handleShareClick = useCallback(async (clip) => {
+    if (shareBusy) return
+    if (getShare(clip.id)) {
+      setSharePopoverClipId((prev) => (prev === clip.id ? null : clip.id))
+      return
+    }
+    const created = await createShare(clip)
+    if (!created) return
+    try {
+      await navigator.clipboard.writeText(created.url)
+      toast('Share link copied')
+    } catch {
+      toast('Share link created', 'info')
+    }
+  }, [shareBusy, getShare, createShare])
+
+  const handleCopyShareUrl = useCallback(async (share) => {
+    try {
+      await navigator.clipboard.writeText(shareUrl(share))
+      toast('Share link copied')
+    } catch {
+      toast('Failed to copy', 'error')
+    }
+  }, [shareUrl])
+
+  const handleRevokeShare = useCallback(async (clip) => {
+    const share = getShare(clip.id)
+    if (!share || shareBusy) return
+    const ok = await revokeShare(share.token)
+    if (ok) {
+      setSharePopoverClipId(null)
+      toast('Share link revoked')
+    }
+  }, [getShare, revokeShare, shareBusy])
 
   // --- Delete with undo ---
   const handleDeleteClick = (clip) => {
@@ -670,6 +731,7 @@ export default function Dashboard({ user, profile }) {
                   {isPinned && !bulkMode && <button className="drag-handle" title="Drag to reorder" {...dragListeners}><IconGrip /></button>}
                   <span className="type-pill"><span className="type-symbol">{getTypeIcon(clip.type)}</span>{clip.type}</span>
                   <div className="clip-card-top-actions">
+                    {getShare(clip.id) && <span className="shared-badge" title="Shared publicly"><IconLink /></span>}
                     {clip.expires_at && <span className="expiry-badge" title={`Expires ${formatDate(clip.expires_at)}`}><IconClock /></span>}
                     <button className={`pin-button ${clip.is_pinned ? 'pinned' : ''}`} title={clip.is_pinned ? 'Unpin' : 'Pin'} onClick={(e) => { e.stopPropagation(); togglePin(clip) }}>
                       {clip.is_pinned ? <IconPinFilled /> : <IconPin />}
@@ -687,6 +749,32 @@ export default function Dashboard({ user, profile }) {
                       {clip.type !== 'image' && <button onClick={() => handleEditClick(clip)} title="Edit"><IconEdit /></button>}
                       {clip.type === 'link' && <button onClick={() => openLink(clip.content)} title="Open"><IconExternalLink /></button>}
                       {(clip.type === 'image' || clip.type === 'file' || clip.type === 'audio') && <button onClick={() => downloadClip(clip)} title="Download"><IconDownload /></button>}
+                      <div className="share-action-wrap">
+                        <button
+                          className={`share-action ${getShare(clip.id) ? 'shared' : ''}`}
+                          onClick={() => handleShareClick(clip)}
+                          disabled={shareBusy}
+                          title={getShare(clip.id) ? 'Manage share link' : 'Create share link'}
+                        >
+                          <IconLink />
+                        </button>
+                        {sharePopoverClipId === clip.id && getShare(clip.id) && (
+                          <div className="share-popover" onClick={(e) => e.stopPropagation()}>
+                            <span className="share-popover-label">Public link</span>
+                            <input
+                              className="share-popover-url"
+                              type="text"
+                              readOnly
+                              value={shareUrl(getShare(clip.id))}
+                              onFocus={(e) => e.target.select()}
+                            />
+                            <div className="share-popover-actions">
+                              <button onClick={() => handleCopyShareUrl(getShare(clip.id))} title="Copy link"><IconCopy /> Copy</button>
+                              <button className="share-revoke" onClick={() => handleRevokeShare(clip)} disabled={shareBusy} title="Revoke link">Revoke</button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                       <button className="expiry-action" onClick={() => handleSetExpiry(clip, clip.expires_at ? null : 7)} title={clip.expires_at ? 'Remove expiry' : 'Expire in 7d'}>
                         {clip.expires_at ? <IconInfinity /> : <IconClock />}
                       </button>
