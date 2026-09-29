@@ -10,8 +10,18 @@ const SUPABASE_BUCKET = 'clips'
 const CLOUDINARY_CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
 const CLOUDINARY_UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
 
-const isUrl = (text) =>
-  /^(https?:\/\/)?[\w.-]+\.[a-z]{2,}([/?#].*)?$/i.test(text)
+// Public TLDs accepted for a scheme-less "bare host" so plain text like
+// `node.js`, `README.md`, or `file.txt` is NOT mis-typed as a link (which
+// would trigger spurious link-preview fetches). Treat as a URL only when it
+// has an explicit http(s) scheme, a `www.` prefix, or a host ending in a
+// recognized public TLD (optionally with a path/query/fragment).
+const URL_TLD_ALLOWLIST =
+  '(?:com|org|net|io|dev|app|co|edu|gov|me|ai|xyz|gg|to|ly|sh|so)'
+const URL_RE = new RegExp(
+  `^(?:https?:\\/\\/\\S+|www\\.\\S+|[\\w-]+(?:\\.[\\w-]+)*\\.${URL_TLD_ALLOWLIST}(?:[/?#]\\S*)?)$`,
+  'i',
+)
+const isUrl = (text) => URL_RE.test(String(text ?? '').trim())
 
 function sortClips(list) {
   return [...list].sort((a, b) => {
@@ -295,6 +305,7 @@ export function useClips(user) {
         metadata: {
           provider: 'cloudinary',
           secure_url: descriptor.secure_url,
+          public_id: descriptor.public_id,
           resource_type: descriptor.resource_type,
           bytes: descriptor.bytes,
           format: descriptor.format,
@@ -387,6 +398,7 @@ export function useClips(user) {
         metadata: {
           provider: 'cloudinary',
           secure_url: descriptor.secure_url,
+          public_id: descriptor.public_id,
           resource_type: descriptor.resource_type,
           bytes: descriptor.bytes,
           format: descriptor.format,
@@ -428,7 +440,38 @@ export function useClips(user) {
       await supabase.storage.from(SUPABASE_BUCKET).remove([clip.file_path])
     }
 
-    // TODO: Delete Cloudinary asset server-side (requires secure backend endpoint)
+    // Best-effort server-side Cloudinary asset cleanup. Deletion requires the
+    // Cloudinary API secret to sign a `destroy` call, so it MUST happen on the
+    // server (/api/delete-asset), never in the browser. The DB row is already
+    // gone at this point, so this is fire-and-forget: any failure is logged but
+    // never blocks the delete UX or rolls the clip back — the asset can be
+    // reaped later, but a stuck asset must not resurrect a deleted clip.
+    if (
+      clip.metadata?.provider === 'cloudinary' &&
+      (clip.metadata?.public_id || clip.metadata?.secure_url)
+    ) {
+      try {
+        const { data } = await supabase.auth.getSession()
+        const token = data?.session?.access_token
+        if (token) {
+          await fetch('/api/delete-asset', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              public_id: clip.metadata.public_id,
+              resource_type: clip.metadata.resource_type,
+              secure_url: clip.metadata.secure_url,
+            }),
+          })
+        }
+      } catch (err) {
+        // Best-effort only — never disrupt the delete flow.
+        console.error('Cloudinary asset cleanup failed:', err?.message || err)
+      }
+    }
 
     trackEvent('delete')
   }, [])

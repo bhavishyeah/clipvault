@@ -35,6 +35,7 @@ export class SizeError extends Error {
 /**
  * @typedef {Object} UploadDescriptor
  * @property {string} secure_url - Cloudinary HTTPS URL
+ * @property {string} public_id - Cloudinary public_id (needed for signed delete); null if absent
  * @property {'image' | 'video' | 'auto'} resource_type - endpoint used
  * @property {number} bytes - size reported by Cloudinary
  * @property {string} format - file format reported by Cloudinary
@@ -162,6 +163,7 @@ export async function uploadFile(file, { userId, onProgress, signal } = {}) {
   // MIME-derived guess if the response omits it.
   return {
     secure_url: uploaded.secure_url,
+    public_id: uploaded.public_id ?? null,
     resource_type: uploaded.resource_type ?? resourceTypeFor(kind),
     bytes: uploaded.bytes,
     format: uploaded.format,

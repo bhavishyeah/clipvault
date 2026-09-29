@@ -350,7 +350,9 @@ export default function Dashboard({ user, profile }) {
     }
     load()
     return () => { cancelled = true }
-  }, [manageGroupId, fetchMembers, groupMemberCounts])
+    // Roster only needs to reload when the managed group changes — not when an
+    // unrelated group's count updates, which would cause a redundant refetch.
+  }, [manageGroupId, fetchMembers])
 
   // Groups augmented with a resolved memberCount for GroupSendPanel.
   const groupsWithCounts = useMemo(
@@ -466,7 +468,24 @@ export default function Dashboard({ user, profile }) {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = clip.file_path?.split('/').pop() || `volt-${Date.now()}.${clip.metadata?.format || 'png'}`
+      // Derive a sensible filename + extension. Cloudinary-backed clips have a
+      // null file_path, so prefer the stored descriptor name/format/mime rather
+      // than defaulting to .png (which would rename an .mp3 to .png).
+      const downloadName = (() => {
+        const fromPath = clip.file_path?.split('/').pop()
+        if (fromPath) return fromPath
+        const storedName = clip.metadata?.name
+        if (storedName) return storedName
+        let ext = clip.metadata?.format
+        if (!ext) {
+          const mime = clip.metadata?.mime
+          if (mime && mime.includes('/')) ext = mime.split('/').pop()
+          else if (clip.type === 'image') ext = 'png'
+          else ext = 'bin'
+        }
+        return `volt-${Date.now()}.${ext}`
+      })()
+      a.download = downloadName
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url)
       toast('Download started')
     } catch { toast('Download failed', 'error') }
@@ -537,13 +556,15 @@ export default function Dashboard({ user, profile }) {
 
   const handleUndo = () => {
     if (!undoClip) return
-    // Re-save the clip
-    if (undoClip.type === 'image') {
-      // Can't easily undo image deletion, just inform
-      toast('Cannot undo image deletion', 'error')
-    } else {
+    // Only text/link clips can be restored by re-saving their content. Files,
+    // images and audio are Cloudinary-backed (no re-savable content here), so
+    // inform the user rather than silently re-inserting an empty clip.
+    const isTextRestorable = (undoClip.type === 'text' || undoClip.type === 'link') && undoClip.content
+    if (isTextRestorable) {
       saveText(undoClip.content)
       toast('Clip restored')
+    } else {
+      toast('Undo is only available for text and links', 'info')
     }
     window.clearTimeout(undoTimer.current)
     setUndoClip(null)
