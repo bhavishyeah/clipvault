@@ -19,7 +19,7 @@
 //   }
 //
 // Behavior:
-//   - Normalizes the payload (api/lib/ingest.js): decides text | link | image
+//   - Normalizes the payload (lib/ingest.js): decides text | link | image
 //     and whether an image must be uploaded.
 //   - Images are uploaded into OUR Cloudinary (unsigned preset) so VOLT owns
 //     them — the resulting secure_url is stored on the transfer, exactly like
@@ -29,12 +29,14 @@
 //     row with sender_id = the authenticated caller.
 
 import { createClient } from '@supabase/supabase-js'
+import { lookup as dnsLookup } from 'node:dns/promises'
 import {
   normalizePayload,
   normalizeRecipient,
   buildTransferRow,
   buildFanoutRows,
 } from '../lib/ingest.js'
+import { validatePreviewUrl, isPrivateHost } from '../lib/linkPreview.js'
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL,
@@ -43,6 +45,44 @@ const supabase = createClient(
 
 const CLOUD_NAME = process.env.VITE_CLOUDINARY_CLOUD_NAME
 const UPLOAD_PRESET = process.env.VITE_CLOUDINARY_UPLOAD_PRESET
+
+/**
+ * Resolve a hostname and confirm every resolved address is public.
+ *
+ * validatePreviewUrl already blocks literal private addresses and obvious
+ * internal names, but a public-looking hostname can still resolve to a private
+ * address (a DNS-rebinding / SSRF vector, e.g. a name pointed at
+ * 169.254.169.254). This post-resolution recheck runs the resolved IP(s) back
+ * through the same isPrivateHost guard. Fails closed: any resolution error →
+ * treat as unsafe. Mirrors the guard in api/link-preview.js.
+ *
+ * @param {string} hostname
+ * @returns {Promise<boolean>} true when safe to fetch, false when it must be blocked
+ */
+async function resolvesToPublicAddress(hostname) {
+  try {
+    const results = await dnsLookup(hostname, { all: true })
+    if (!results || results.length === 0) return false
+    return results.every((r) => !isPrivateHost(r.address))
+  } catch {
+    return false
+  }
+}
+
+/**
+ * SSRF guard for a REMOTE image URL before it is handed to Cloudinary's
+ * fetch-upload (Cloudinary fetches the URL server-side). Runs the shared
+ * scheme/literal-private-range check AND a post-DNS-resolution recheck. data:
+ * URIs are NOT remote fetches and must NOT reach this guard.
+ *
+ * @param {string} imageUpload - an http(s) URL (never a data: URI)
+ * @returns {Promise<boolean>} true when safe to upload, false when it must be blocked
+ */
+async function isRemoteImageUrlSafe(imageUpload) {
+  const check = validatePreviewUrl(imageUpload)
+  if (!check.ok) return false
+  return resolvesToPublicAddress(check.url.hostname)
+}
 
 // Upload a remote URL or data: URI to Cloudinary via the unsigned preset.
 // Cloudinary fetches remote URLs / decodes data URIs server-side. Returns the
@@ -115,14 +155,25 @@ export default async function handler(req, res) {
     let fileDescriptor = null
     let effectivePayload = payload
     if (payload.type === 'image') {
-      try {
-        fileDescriptor = await uploadToCloudinary(payload.imageUpload, senderId)
-      } catch (err) {
-        if (payload.imageUpload.startsWith('data:')) {
-          return res.status(502).json({ error: `Image upload failed: ${err.message}` })
-        }
-        // Degrade to a link so the send is never lost.
+      const isDataUri = payload.imageUpload.startsWith('data:')
+
+      // SSRF guard: a caller-supplied REMOTE image URL is fetched server-side
+      // by Cloudinary, so validate it (scheme + private ranges + post-DNS
+      // recheck) before upload. data: URIs are decoded locally, not fetched,
+      // so they skip the guard. A blocked remote URL degrades to a link
+      // exactly like an upload failure — never an upload, never an error.
+      if (!isDataUri && !(await isRemoteImageUrlSafe(payload.imageUpload))) {
         effectivePayload = { ...payload, type: 'link', content: payload.imageUpload, imageUpload: null }
+      } else {
+        try {
+          fileDescriptor = await uploadToCloudinary(payload.imageUpload, senderId)
+        } catch (err) {
+          if (isDataUri) {
+            return res.status(502).json({ error: `Image upload failed: ${err.message}` })
+          }
+          // Degrade to a link so the send is never lost.
+          effectivePayload = { ...payload, type: 'link', content: payload.imageUpload, imageUpload: null }
+        }
       }
     }
 
