@@ -12,14 +12,15 @@ async function confirmAndLogin(token) {
 
   const data = await res.json()
 
-  if (!res.ok || !data.success) {
+  if (!res.ok || !data.success || !data.token_hash) {
     return { ok: false, error: data.error || 'Failed to connect' }
   }
 
-  // Sign in as the anonymous user on this device (phone)
-  const { error: signInError } = await supabase.auth.signInWithPassword({
-    email: data.email,
-    password: data.password,
+  // Sign in on this device (phone) with the one-time magiclink token_hash.
+  // No password crosses the wire.
+  const { error: signInError } = await supabase.auth.verifyOtp({
+    token_hash: data.token_hash,
+    type: 'email',
   })
 
   if (signInError) {

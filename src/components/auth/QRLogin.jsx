@@ -57,16 +57,15 @@ export default function QRLogin() {
 
         const data = await res.json()
 
-        if (data.status === 'confirmed' && data.email) {
+        if (data.status === 'confirmed' && data.token_hash) {
           window.clearInterval(pollRef.current)
           setStatus('signing-in')
 
-          // Sign in with the anonymous user credentials
-          // Password is derived from the QR token
-          const anonPassword = `anon-${tokenRef.current.slice(0, 32)}`
-          await supabase.auth.signInWithPassword({
-            email: data.email,
-            password: anonPassword,
+          // Sign in with the one-time magiclink token_hash. No password
+          // crosses the wire.
+          await supabase.auth.verifyOtp({
+            token_hash: data.token_hash,
+            type: 'email',
           })
         }
       } catch {
