@@ -12,8 +12,14 @@ import { isDataImage, isImageUrl, unwrapImageUrl } from '../../lib/ingestImage'
 
 // Broader than isImageUrl: also matches bare domains (no scheme) so the
 // "Open link" affordance appears for any URL-shaped content.
+const URL_TLD_ALLOWLIST =
+  '(?:com|org|net|io|dev|app|co|edu|gov|me|ai|xyz|gg|to|ly|sh|so)'
+const URL_RE = new RegExp(
+  `^(?:https?:\\/\\/\\S+|www\\.\\S+|[\\w-]+(?:\\.[\\w-]+)*\\.${URL_TLD_ALLOWLIST}(?:[/?#]\\S*)?)$`,
+  'i',
+)
 const isUrl = (text) =>
-  typeof text === 'string' && /^(https?:\/\/)?[\w.-]+\.[a-z]{2,}([/?#].*)?$/i.test(text.trim())
+  typeof text === 'string' && URL_RE.test(text.trim())
 
 // Resolve a link for "Open link": unwrap Google imgres wrappers to the real
 // image, and ensure a scheme so window.open navigates correctly.

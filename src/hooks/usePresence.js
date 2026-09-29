@@ -54,9 +54,11 @@ export function usePresence(user) {
 
     // Handle before unload (tab/window close)
     const handleBeforeUnload = () => {
-      // Mark offline synchronously — best effort
-      // sendBeacon doesn't work with Supabase auth headers
-      // The heartbeat timeout on server will mark user offline within 60s
+      // Best-effort offline mark — fire-and-forget, mirroring the
+      // visibility-hidden path. sendBeacon can't carry Supabase auth headers,
+      // so this request may not complete on a hard close; the server's
+      // heartbeat/last_seen age remains the real source of truth for staleness.
+      setOffline()
     }
 
     document.addEventListener('visibilitychange', handleVisibility)

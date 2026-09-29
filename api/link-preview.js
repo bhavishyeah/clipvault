@@ -136,6 +136,9 @@ async function fetchHtml(url) {
     } catch {
       // ignore — already done
     }
+    // Flush any bytes buffered in the streaming decoder (e.g. a multi-byte
+    // sequence split across the last chunk) so no trailing text is dropped.
+    html += decoder.decode()
     return html
   } catch {
     // Timeout (abort), network error, DNS failure, etc. → graceful null.

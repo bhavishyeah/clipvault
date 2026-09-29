@@ -8,7 +8,13 @@ import { classifyFile } from '../../lib/fileType'
 const ACCEPT = 'image/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip'
 const FILE_INPUT_ID = 'send-composer-file-input'
 
-const isUrl = (text) => /^(https?:\/\/)?[\w.-]+\.[a-z]{2,}([/?#].*)?$/i.test(text)
+const URL_TLD_ALLOWLIST =
+  '(?:com|org|net|io|dev|app|co|edu|gov|me|ai|xyz|gg|to|ly|sh|so)'
+const URL_RE = new RegExp(
+  `^(?:https?:\\/\\/\\S+|www\\.\\S+|[\\w-]+(?:\\.[\\w-]+)*\\.${URL_TLD_ALLOWLIST}(?:[/?#]\\S*)?)$`,
+  'i',
+)
+const isUrl = (text) => URL_RE.test(String(text ?? '').trim())
 
 export default function SendComposer({ onClose, searchUsers, sendTo, sending, userId, contacts, addContact, removeContact }) {
   const [content, setContent] = useState('')

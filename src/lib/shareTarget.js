@@ -11,6 +11,16 @@
 
 import { isDataImage, isImageUrl, unwrapImageUrl } from './ingestImage'
 
+// Public TLDs accepted for a scheme-less "bare host" so plain text isn't
+// mis-classified as a link. Mirrors the rule in lib/ingest.js and
+// hooks/useClips.js for consistent link/text typing across capture paths.
+const URL_TLD_ALLOWLIST =
+  '(?:com|org|net|io|dev|app|co|edu|gov|me|ai|xyz|gg|to|ly|sh|so)'
+const URL_RE = new RegExp(
+  `^(?:https?:\\/\\/\\S+|www\\.\\S+|[\\w-]+(?:\\.[\\w-]+)*\\.${URL_TLD_ALLOWLIST}(?:[/?#]\\S*)?)$`,
+  'i',
+)
+
 /**
  * @typedef {Object} ShareIntent
  * @property {'image' | 'link' | 'text'} kind
@@ -47,8 +57,10 @@ export function parseShare(search) {
     return { kind: 'image', value: unwrapped }
   }
 
-  // A bare URL (no image extension) → link; anything else → text. Reuse a
-  // permissive URL shape so shared links are classified as links.
-  const looksUrl = /^(https?:\/\/)?[\w.-]+\.[a-z]{2,}([/?#].*)?$/i.test(content)
+  // A bare URL (no image extension) → link; anything else → text. Treat as a
+  // URL only with an explicit http(s) scheme, a `www.` prefix, or a host
+  // ending in a recognized public TLD, so plain text (e.g. `node.js`) isn't
+  // mis-typed as a link.
+  const looksUrl = URL_RE.test(content)
   return { kind: looksUrl ? 'link' : 'text', value: content }
 }
