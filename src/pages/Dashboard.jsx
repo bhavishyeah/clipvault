@@ -468,20 +468,72 @@ export default function Dashboard({ user, profile }) {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      // Derive a sensible filename + extension. Cloudinary-backed clips have a
-      // null file_path, so prefer the stored descriptor name/format/mime rather
-      // than defaulting to .png (which would rename an .mp3 to .png).
+      // Derive a sensible filename + extension in priority order:
+      // 1. Supabase Storage path  (non-Cloudinary clips)
+      // 2. metadata.name          (stored on upload for new clips, e.g. "report.docx")
+      // 3. filename from secure_url (last path segment before query, minus version)
+      //    — covers older clips saved before metadata.name was captured
+      // 4. volt-<ts>.<ext>        (last resort — ext from format → mime → type)
       const downloadName = (() => {
+        // 1. Supabase Storage path
         const fromPath = clip.file_path?.split('/').pop()
         if (fromPath) return fromPath
+
+        // 2. Stored original filename
         const storedName = clip.metadata?.name
         if (storedName) return storedName
+
+        // 3. Derive from secure_url — Cloudinary URLs look like:
+        //    https://res.cloudinary.com/<cloud>/<type>/upload/v<ver>/<folder>/<name>.<ext>
+        //    The last path segment (before any query string) is "name.ext".
+        const secureUrl = clip.metadata?.secure_url
+        if (secureUrl) {
+          try {
+            const pathname = new URL(secureUrl).pathname
+            const segment = pathname.split('/').pop()?.split('?')[0] || ''
+            if (segment && segment.includes('.')) return segment
+          } catch { /* not a valid URL — fall through */ }
+        }
+
+        // 4. Fallback: construct volt-<ts>.<ext>
+        // Prefer metadata.format (Cloudinary reports e.g. "docx", "mp3", "pdf").
+        // If absent, map the MIME type to a sensible extension — long Office
+        // MIME strings like "application/vnd.openxml..." are mapped explicitly
+        // rather than naively splitting, which would give "document" not "docx".
         let ext = clip.metadata?.format
         if (!ext) {
-          const mime = clip.metadata?.mime
-          if (mime && mime.includes('/')) ext = mime.split('/').pop()
-          else if (clip.type === 'image') ext = 'png'
-          else ext = 'bin'
+          const mime = clip.metadata?.mime || ''
+          const MIME_TO_EXT = {
+            'application/pdf': 'pdf',
+            'application/zip': 'zip',
+            'application/json': 'json',
+            'text/plain': 'txt',
+            'text/csv': 'csv',
+            'audio/mpeg': 'mp3',
+            'audio/mp4': 'm4a',
+            'audio/wav': 'wav',
+            'audio/ogg': 'ogg',
+            'audio/webm': 'webm',
+            'video/mp4': 'mp4',
+            'video/webm': 'webm',
+            'image/png': 'png',
+            'image/jpeg': 'jpg',
+            'image/gif': 'gif',
+            'image/webp': 'webp',
+            'application/msword': 'doc',
+            'application/vnd.ms-excel': 'xls',
+            'application/vnd.ms-powerpoint': 'ppt',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+            'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+          }
+          ext = MIME_TO_EXT[mime]
+          if (!ext) {
+            // Last resort: simple subtype split works for most audio/image types
+            const sub = mime.split('/')[1] || ''
+            ext = sub && !sub.startsWith('vnd.') && !sub.startsWith('x-') ? sub : null
+          }
+          if (!ext) ext = clip.type === 'image' ? 'png' : 'bin'
         }
         return `volt-${Date.now()}.${ext}`
       })()
