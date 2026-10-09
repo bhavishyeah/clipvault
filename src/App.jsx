@@ -12,6 +12,18 @@ import MfaChallenge from './components/auth/MfaChallenge.jsx'
 import PublicShare from './components/share/PublicShare.jsx'
 import { sharePathToken } from './lib/share'
 
+const APP_LOADER_VIDEO_SRC = '/media/loader.mp4'
+
+function AppLoader() {
+  return (
+    <div className="app-loader" role="status" aria-live="polite" aria-label="Loading">
+      <video className="app-loader-video" autoPlay loop muted playsInline preload="auto">
+        <source src={APP_LOADER_VIDEO_SRC} type="video/mp4" />
+      </video>
+    </div>
+  )
+}
+
 function tokenClaim(accessToken, claim) {
   try {
     const payload = accessToken?.split('.')[1]
@@ -193,12 +205,7 @@ export default function App() {
   }
 
   if (loading) {
-    return (
-      <div className="app-loader">
-        <div className="app-loader-bar" />
-        <span className="app-loader-text">VOLT</span>
-      </div>
-    )
+    return <AppLoader />
   }
 
   // QR confirmation page
@@ -232,22 +239,12 @@ export default function App() {
 
   // Still checking profile
   if (profile === undefined) {
-    return (
-      <div className="app-loader">
-        <div className="app-loader-bar" />
-        <span className="app-loader-text">VOLT</span>
-      </div>
-    )
+    return <AppLoader />
   }
 
   // Still resolving the assurance level for the vault gate
   if (aal === undefined) {
-    return (
-      <div className="app-loader">
-        <div className="app-loader-bar" />
-        <span className="app-loader-text">VOLT</span>
-      </div>
-    )
+    return <AppLoader />
   }
 
   // Vault access gate (Req 7.4, 7.6, 9.6, 10.5): a session with an active

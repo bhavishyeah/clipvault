@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabaseClient'
-import { IconVault } from '../ui/Icons'
+import BrandVideo from '../ui/BrandVideo'
 
 async function confirmAndLogin(token) {
   // Call API to create anonymous user and confirm the QR session
@@ -59,7 +59,7 @@ export default function QRConfirmPage({ token, onDone }) {
   return (
     <main className="auth-page">
       <section className="auth-card">
-        <div className="auth-logo"><IconVault width="24" height="24" /></div>
+        <div className="auth-logo"><BrandVideo className="auth-logo-video" /></div>
 
         {status === 'confirming' && (
           <>

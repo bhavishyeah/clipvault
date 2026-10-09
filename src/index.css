@@ -142,12 +142,15 @@ a {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
+  width: fit-content;
   margin: 0 auto 20px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  color: var(--text);
+}
+
+.auth-logo-video {
+  display: block;
+  width: clamp(120px, 26vw, 170px);
+  height: clamp(36px, 7vw, 52px);
+  object-fit: contain;
 }
 
 .auth-card h1 {

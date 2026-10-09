@@ -28,8 +28,9 @@ import MemberList from '../components/groups/MemberList'
 import AddMemberModal from '../components/groups/AddMemberModal'
 import SecuritySettings from '../components/auth/SecuritySettings'
 import InsightsPanel from '../components/insights/InsightsPanel'
+import BrandVideo from '../components/ui/BrandVideo'
 import {
-  IconVault, IconCopy, IconTrash, IconEdit, IconPin, IconPinFilled,
+  IconCopy, IconTrash, IconEdit, IconPin, IconPinFilled,
   IconDownload, IconExternalLink, IconSearch, IconImage, IconText, IconLink,
   IconSun, IconMoon, IconLogOut, IconMenu, IconGrip, IconClock,
   IconInfinity, IconCheck, IconClipboard, IconQr,
@@ -43,6 +44,7 @@ import './Dashboard.css'
 // Relative date-window presets for the search toolbar (Req 5.2). Each maps to a
 // lookback duration in ms; 'any' applies no date constraint. The active preset
 // resolves to a `dateFrom` (now - ms) passed into matchesClip.
+
 const DATE_WINDOWS = [
   { value: 'any', label: 'Any time', ms: null },
   { value: '24h', label: 'Last 24h', ms: 24 * 60 * 60 * 1000 },
@@ -826,9 +828,8 @@ export default function Dashboard({ user, profile }) {
       <div className="vault-container">
         <header className="topbar">
           <div className="brand-lockup">
-            <div className="brand-mark"><IconVault /></div>
             <div>
-              <div className="brand-name">VOLT</div>
+              <BrandVideo className="brand-video" />
               <div className="brand-caption">Private clipboard</div>
             </div>
           </div>

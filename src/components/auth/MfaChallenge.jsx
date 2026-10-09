@@ -3,7 +3,7 @@ import { useMfa } from '../../hooks/useMfa'
 import { supabase } from '../../lib/supabaseClient'
 import { isValidTotpFormat } from '../../lib/mfa'
 import { markRecoveryElevated } from '../../lib/recoveryElevation'
-import { IconVault } from '../ui/Icons'
+import BrandVideo from '../ui/BrandVideo'
 
 // VOLT — Login-time MFA challenge step (Feature 2: TOTP 2FA)
 //
@@ -78,9 +78,10 @@ export default function MfaChallenge({ user, onVerified, onCancel }) {
 
   if (mfa.loading) {
     return (
-      <div className="app-loader">
-        <div className="app-loader-bar" />
-        <span className="app-loader-text">VOLT</span>
+      <div className="app-loader" role="status" aria-live="polite" aria-label="Loading">
+        <video className="app-loader-video" autoPlay loop muted playsInline preload="auto">
+          <source src="/media/loader.mp4" type="video/mp4" />
+        </video>
       </div>
     )
   }
@@ -88,7 +89,7 @@ export default function MfaChallenge({ user, onVerified, onCancel }) {
   return (
     <main className="auth-page">
       <section className="auth-card">
-        <div className="auth-logo"><IconVault width="24" height="24" /></div>
+        <div className="auth-logo"><BrandVideo className="auth-logo-video" /></div>
         <h1>{useRecovery ? 'Enter recovery code' : 'Two-factor authentication'}</h1>
         <p className="auth-subtitle">
           {useRecovery
