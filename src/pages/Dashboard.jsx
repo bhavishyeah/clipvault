@@ -1061,8 +1061,13 @@ export default function Dashboard({ user, profile }) {
             renderClip={(clip, isPinned, dragListeners) => (
               <article className={`clip-card clip-${clip.type} ${selectedIds.has(clip.id) ? 'selected' : ''}`} key={clip.id} onClick={bulkMode ? () => toggleSelect(clip.id) : undefined}>
                 <div className="clip-card-top">
-                  {bulkMode && <span className={`bulk-checkbox ${selectedIds.has(clip.id) ? 'checked' : ''}`}>{selectedIds.has(clip.id) && <IconCheck />}</span>}
-                  {isPinned && !bulkMode && <button className="drag-handle" title="Drag to reorder" {...dragListeners}><IconGrip /></button>}
+                  <div className="clip-card-top-left">
+                    {bulkMode && <span className={`bulk-checkbox ${selectedIds.has(clip.id) ? 'checked' : ''}`}>{selectedIds.has(clip.id) && <IconCheck />}</span>}
+                    {isPinned && !bulkMode && <button className="drag-handle" title="Drag to reorder" {...dragListeners}><IconGrip /></button>}
+                    {!bulkMode && (
+                      <TagEditor tags={clip.metadata?.tags} onChange={(next) => setTags(clip, next)} />
+                    )}
+                  </div>
                   <div className="clip-card-top-actions">
                     {getShare(clip.id) && <span className="shared-badge" title="Shared publicly"><IconLink /></span>}
                     {clip.expires_at && (
@@ -1081,10 +1086,6 @@ export default function Dashboard({ user, profile }) {
                 </div>
 
                 <ClipBody clip={clip} onFetchPreview={handleFetchPreview} />
-
-                {!bulkMode && (
-                  <TagEditor tags={clip.metadata?.tags} onChange={(next) => setTags(clip, next)} />
-                )}
 
                 {!bulkMode && (
                   <div className="clip-card-bottom">

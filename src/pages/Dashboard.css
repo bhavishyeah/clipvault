@@ -712,10 +712,19 @@
   gap: 8px;
 }
 
+.clip-card-top-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;        /* allow the tag editor to shrink/ellipsis, not overflow */
+  flex: 1;
+}
+
 .clip-card-top-actions {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;      /* expiry + pin never get squeezed by long tags */
 }
 
 .type-pill {
@@ -837,20 +846,24 @@
 }
 
 /* Image preview */
+/* Image preview adapts to the image's own aspect ratio: it fills the card
+   width and sets its height from the natural ratio (height:auto), so a wide
+   banner shows short and a tall poster shows tall — the masonry column then
+   hugs it. A max-height keeps one very tall image from dominating a column. */
 .image-preview-wrap {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 140px;
+  display: block;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg);
+  line-height: 0;        /* kill the inline-image baseline gap */
 }
 
 .image-preview {
+  display: block;
   width: 100%;
-  height: 100%;
+  height: auto;          /* follow the image's natural aspect ratio */
+  max-height: 420px;     /* cap extreme portraits */
   object-fit: contain;
 }
 
@@ -1606,10 +1619,19 @@
   transition: border-color .15s, transform .15s, box-shadow .15s;
 }
 
+/* 60fps hover: animate ONLY transform + compositor-friendly props so the lift
+   never triggers layout/paint on the grid. The hovered card scales up slightly
+   and lifts; neighbours are untouched (transform doesn't reflow). */
+.clip-card {
+  transform: translateZ(0);        /* own compositor layer → smooth transform */
+  transform-origin: center top;
+}
+
 .clip-card:hover {
   border-color: var(--border-hover);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 16px rgba(0,0,0,.1);
+  transform: scale(1.015) translateY(-2px);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .14);
+  z-index: 2;                        /* lifted card sits above its neighbours */
 }
 
 .clip-card.selected {
@@ -1618,44 +1640,78 @@
 }
 
 /* --------------------------------------------------------------------------
-   Hover-reveal chrome: the tag editor and the bottom action row stay hidden
-   until the card is hovered or focused, so an idle grid reads as clean content
-   cards. The card keeps a stable height (no layout jump) by reserving the row
-   via max-height/opacity rather than display:none. On touch devices (no hover)
-   the chrome is always shown, since there is no hover to trigger it.
+   Hover-reveal chrome. At rest the card is compact: the bottom action row is
+   collapsed to zero height (via the grid 0fr→1fr trick, which animates far
+   smoother than max-height) and faded out. On hover/focus it expands and fades
+   in — so an idle grid reads as clean content and the controls appear "like
+   magic" on approach. Touch devices (no hover) always show the chrome.
    -------------------------------------------------------------------------- */
-.clip-card .tag-editor,
+
+/* Bottom action row: collapse height + fade at rest. The row is wrapped in a
+   grid whose single row animates from 0fr (collapsed) to 1fr (full height). */
 .clip-card .clip-card-bottom {
+  display: grid;
+  grid-template-rows: 0fr;
   opacity: 0;
-  transition: opacity .15s ease;
+  /* GPU-friendly: grid-template-rows + opacity transition, no layout thrash
+     on neighbours (only this card's own box changes). */
+  transition: grid-template-rows .22s cubic-bezier(.22, 1, .36, 1), opacity .18s ease;
 }
 
-.clip-card:hover .tag-editor,
-.clip-card:focus-within .tag-editor,
+/* The actual content must be an overflow:hidden child for 0fr to clip it. */
+.clip-card .clip-card-bottom > * {
+  min-height: 0;
+  overflow: hidden;
+}
+
 .clip-card:hover .clip-card-bottom,
 .clip-card:focus-within .clip-card-bottom {
+  grid-template-rows: 1fr;
   opacity: 1;
 }
 
-/* A clip that already has tags shows them even when idle (they're content, not
-   chrome); only the "+ tag" affordance is hover-gated via .tag-editor opacity.
-   Keep tagged clips legible at rest. */
-.clip-card .tag-editor:has(.tag-chip) {
+/* Top-bar "+ tag" affordance: hidden at rest, revealed on hover. Existing tag
+   chips are content and stay visible always (handled below). */
+.clip-card .tag-editor .tag-add {
+  opacity: 0;
+  transition: opacity .18s ease;
+}
+
+.clip-card:hover .tag-editor .tag-add,
+.clip-card:focus-within .tag-editor .tag-add {
   opacity: 1;
 }
 
-/* Touch / no-hover devices: always reveal (no hover state exists). */
+/* Touch / no-hover devices: always reveal (there is no hover to trigger it). */
 @media (hover: none) {
-  .clip-card .tag-editor,
   .clip-card .clip-card-bottom {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+  .clip-card .tag-editor .tag-add {
     opacity: 1;
   }
 }
 
-/* Selected (bulk mode) cards always show their chrome too. */
-.clip-card.selected .tag-editor,
+/* Selected (bulk) cards always show their chrome. */
 .clip-card.selected .clip-card-bottom {
+  grid-template-rows: 1fr;
   opacity: 1;
+}
+.clip-card.selected .tag-editor .tag-add {
+  opacity: 1;
+}
+
+/* Respect reduced-motion: no scale/animation, just show chrome on hover. */
+@media (prefers-reduced-motion: reduce) {
+  .clip-card,
+  .clip-card:hover {
+    transform: none;
+    transition: border-color .15s, box-shadow .15s;
+  }
+  .clip-card .clip-card-bottom {
+    transition: opacity .15s ease;
+  }
 }
 
 /* ==========================================================================
@@ -2979,26 +3035,15 @@
 /* ==========================================================================
    Clip tags (A1) — chips + inline add/remove editor
    ========================================================================== */
+/* Tag editor now lives inline at the top-left of the card header (not a full
+   row below the body), so it carries no top margin and sits flush with the
+   drag handle. It wraps if a clip accumulates several tags. */
 .tag-editor {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  margin-top: 8px;
-  min-height: 24px; /* reserve one row so hover-reveal doesn't shift layout */
-}
-
-/* An untagged editor (only the "+ tag" affordance) collapses at rest so it
-   never leaves an empty full-width gap; it expands on hover with the chrome. */
-.tag-editor:not(:has(.tag-chip)) {
-  margin-top: 0;
-  min-height: 0;
-}
-
-.clip-card:hover .tag-editor:not(:has(.tag-chip)),
-.clip-card:focus-within .tag-editor:not(:has(.tag-chip)) {
-  margin-top: 8px;
-  min-height: 24px;
+  min-width: 0;
 }
 
 .tag-chip {
