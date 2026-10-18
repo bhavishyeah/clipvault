@@ -33,6 +33,23 @@ export class SizeError extends Error {
 }
 
 /**
+ * Thrown when the upload XHR is torn down via its `abort` event without the
+ * caller requesting cancellation (e.g. the browser resets the connection after
+ * the bytes have already been sent — common with audio/video `/auto/upload`
+ * where Cloudinary has received and processed the file but the socket drops).
+ * This is AMBIGUOUS: the asset may well have been stored. Callers should treat
+ * it as a non-fatal "cancelled" rather than a hard error, and reconcile via the
+ * Realtime INSERT. A genuine network failure or non-2xx response is a plain
+ * Error, NOT this — so real failures are never masked.
+ */
+export class UploadAbortedError extends Error {
+  constructor(message = 'Upload cancelled') {
+    super(message)
+    this.name = 'UploadAbortedError'
+  }
+}
+
+/**
  * @typedef {Object} UploadDescriptor
  * @property {string} secure_url - Cloudinary HTTPS URL
  * @property {string} public_id - Cloudinary public_id (needed for signed delete); null if absent
@@ -106,7 +123,7 @@ export async function uploadFile(file, { userId, onProgress, signal } = {}) {
     if (signal) {
       if (signal.aborted) {
         clearTimeout(timer)
-        reject(new Error('Upload cancelled'))
+        reject(new UploadAbortedError())
         return
       }
       signal.addEventListener('abort', onAbort)
@@ -148,7 +165,9 @@ export async function uploadFile(file, { userId, onProgress, signal } = {}) {
     })
     xhr.addEventListener('abort', () => {
       cleanup()
-      reject(new Error('Upload cancelled'))
+      // A bare abort (no external signal, not the timeout) means the socket was
+      // torn down after send — the asset may already be stored. Non-fatal.
+      reject(new UploadAbortedError())
     })
 
     // Always POST to the `auto` endpoint so Cloudinary detects the resource

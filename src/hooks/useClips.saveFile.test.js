@@ -87,9 +87,16 @@ vi.mock('../lib/uploadFile', () => {
       this.limit = limit
     }
   }
+  class UploadAbortedError extends Error {
+    constructor(message = 'Upload cancelled') {
+      super(message)
+      this.name = 'UploadAbortedError'
+    }
+  }
   return {
     uploadFile: (...args) => uploadFile(...args),
     SizeError,
+    UploadAbortedError,
   }
 })
 

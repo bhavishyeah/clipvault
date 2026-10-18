@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabaseClient'
 import { toast } from '../components/ui/toastStore'
 import { trackEvent } from '../lib/analytics'
 import { checkRateLimit } from '../lib/rateLimit'
-import { uploadFile, SizeError } from '../lib/uploadFile'
+import { uploadFile, SizeError, UploadAbortedError } from '../lib/uploadFile'
 import { classifyFile, validateFile } from '../lib/fileType'
 
 const SUPABASE_BUCKET = 'clips'
@@ -319,9 +319,19 @@ export function useClips(user) {
       toast(type === 'image' ? 'Image saved' : type === 'audio' ? 'Audio saved' : 'File saved')
       trackEvent(type === 'image' ? 'save_image' : 'save_file')
     } catch (err) {
+      // Always drop the optimistic temp card; if the asset actually landed, the
+      // Realtime INSERT re-adds the real row (temp entries reconcile by type).
       setClips((prev) => prev.filter((c) => c.id !== optimisticId))
-      toast(err instanceof SizeError ? err.message : `Upload error: ${err.message}`, 'error')
-      console.error('Could not save file:', err.message)
+
+      if (err instanceof UploadAbortedError) {
+        // Ambiguous teardown (socket reset after send). The file may already be
+        // stored — Realtime reconciles it — so don't alarm the user with a
+        // false "upload error". Log only.
+        console.warn('Upload aborted (may still have been stored):', err.message)
+      } else {
+        toast(err instanceof SizeError ? err.message : `Upload error: ${err.message}`, 'error')
+        console.error('Could not save file:', err.message)
+      }
     } finally {
       setSaving(false)
       setUploadProgress(0)
@@ -412,8 +422,13 @@ export function useClips(user) {
       trackEvent('save_image')
     } catch (err) {
       setClips((prev) => prev.filter((c) => c.id !== optimisticId))
-      toast(`Could not save image: ${err.message}`, 'error')
-      console.error('Could not save image from url:', err.message)
+      if (err instanceof UploadAbortedError) {
+        // Ambiguous teardown after send — Realtime reconciles if it landed.
+        console.warn('Image ingest aborted (may still have been stored):', err.message)
+      } else {
+        toast(`Could not save image: ${err.message}`, 'error')
+        console.error('Could not save image from url:', err.message)
+      }
     } finally {
       setSaving(false)
       setUploadProgress(0)

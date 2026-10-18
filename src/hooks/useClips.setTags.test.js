@@ -83,7 +83,8 @@ vi.mock('../lib/supabaseClient', () => {
 
 vi.mock('../lib/uploadFile', () => {
   class SizeError extends Error {}
-  return { uploadFile: vi.fn(), SizeError }
+  class UploadAbortedError extends Error {}
+  return { uploadFile: vi.fn(), SizeError, UploadAbortedError }
 })
 
 const toast = vi.fn()
