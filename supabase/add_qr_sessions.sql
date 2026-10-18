@@ -13,11 +13,15 @@ CREATE TABLE IF NOT EXISTS public.qr_sessions (
 
 ALTER TABLE public.qr_sessions ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "users manage own qr sessions" ON public.qr_sessions;
 CREATE POLICY "users manage own qr sessions" ON public.qr_sessions
   FOR ALL USING (auth.uid() = user_id);
 
-CREATE POLICY "anyone can read pending by token" ON public.qr_sessions
-  FOR SELECT USING (status = 'pending' OR status = 'confirmed');
+-- The anon client must NEVER read raw QR tokens: all QR session access goes
+-- through the service-role endpoints (/api/qr-session, /api/qr-confirm),
+-- which bypass RLS. A broad SELECT policy here would let any authenticated
+-- user enumerate every active token and hijack sessions, so it is removed.
+DROP POLICY IF EXISTS "anyone can read pending by token" ON public.qr_sessions;
 
 CREATE INDEX IF NOT EXISTS qr_sessions_token_idx ON public.qr_sessions (token);
 CREATE INDEX IF NOT EXISTS qr_sessions_expires_idx ON public.qr_sessions (expires_at);
