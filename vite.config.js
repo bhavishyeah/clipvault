@@ -68,14 +68,17 @@ export default defineConfig({
         // Runtime caching for offline asset viewing
         runtimeCaching: [
           {
-            // Cache Cloudinary images for offline viewing
+            // Cache Cloudinary images with NetworkFirst so deleted/revoked
+            // assets don't linger: the network is tried first (a 404 for a
+            // deleted asset surfaces instead of a stale cached copy), falling
+            // back to the cache only when the network is unavailable (offline).
             urlPattern: /^https:\/\/res\.cloudinary\.com\/.*/i,
-            handler: 'CacheFirst',
+            handler: 'NetworkFirst',
             options: {
               cacheName: 'cloudinary-images',
               expiration: {
                 maxEntries: 100,
-                maxAgeSeconds: 60 * 60 * 24 * 7, // 7 days
+                maxAgeSeconds: 60 * 60 * 24, // 1 day
               },
               cacheableResponse: {
                 statuses: [0, 200],

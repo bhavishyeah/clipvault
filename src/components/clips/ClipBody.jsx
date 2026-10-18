@@ -101,11 +101,15 @@ export default function ClipBody({ clip, onFetchPreview }) {
     // may be null, so each is rendered conditionally; the favicon+domain line
     // is kept as a stable anchor beneath the rich text.
     const domain = clip.content?.replace(/^https?:\/\//, '').split('/')[0]
+    // Defense in depth: only ever render an https image URL. og:image is
+    // attacker-controlled, so reject data:/http:/javascript:/relative values
+    // even if one slipped past the parser.
+    const safeImage = preview?.image && /^https:\/\//i.test(preview.image) ? preview.image : null
     return (
       <div className="link-preview rich">
-        {preview.image && (
+        {safeImage && (
           <img
-            src={preview.image}
+            src={safeImage}
             alt=""
             className="link-thumb"
             loading="lazy"

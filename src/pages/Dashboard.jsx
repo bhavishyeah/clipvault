@@ -233,6 +233,7 @@ export default function Dashboard({ user, profile }) {
   const [selectedIds, setSelectedIds] = useState(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
   const [undoClip, setUndoClip] = useState(null)
+  const [undoBulk, setUndoBulk] = useState(null)
   const undoTimer = useRef(null)
   const searchTimer = useRef(null)
   const searchInputRef = useRef(null)
@@ -655,7 +656,32 @@ export default function Dashboard({ user, profile }) {
 
   const toggleSelect = (id) => setSelectedIds((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
   const selectAll = () => setSelectedIds(new Set(filteredClips.map((c) => c.id)))
-  const bulkDelete = () => { selectedIds.forEach((id) => { const c = clips.find((x) => x.id === id); if (c) removeClip(c) }); setSelectedIds(new Set()); setBulkMode(false); setBulkConfirm(false) }
+  const bulkDelete = () => {
+    const deleted = [...selectedIds].map((id) => clips.find((x) => x.id === id)).filter(Boolean)
+    deleted.forEach((c) => removeClip(c))
+    setSelectedIds(new Set())
+    setBulkMode(false)
+    setBulkConfirm(false)
+    if (deleted.length) {
+      setUndoBulk(deleted)
+      window.clearTimeout(undoTimer.current)
+      undoTimer.current = window.setTimeout(() => setUndoBulk(null), 5000)
+    }
+  }
+
+  // Restore the text/link clips removed by a bulk delete. Image/file/audio
+  // clips are Cloudinary-backed and cannot be re-saved via saveText — the same
+  // limitation as single-clip undo — so they are counted as skipped.
+  const handleUndoBulk = () => {
+    if (!undoBulk) return
+    const restorable = undoBulk.filter((c) => (c.type === 'text' || c.type === 'link') && c.content)
+    restorable.forEach((c) => saveText(c.content))
+    const skipped = undoBulk.length - restorable.length
+    if (restorable.length) toast(skipped ? `Restored ${restorable.length}; ${skipped} file/image clip(s) can't be undone` : `Restored ${restorable.length} clip(s)`)
+    else toast('Undo is only available for text and links', 'info')
+    window.clearTimeout(undoTimer.current)
+    setUndoBulk(null)
+  }
 
   const exportVault = () => {
     const data = clips.map((c) => ({ type: c.type, content: c.content || null, url: c.url || null, is_pinned: c.is_pinned, created_at: c.created_at, metadata: c.metadata }))
@@ -668,11 +694,17 @@ export default function Dashboard({ user, profile }) {
 
   const signOutAll = async () => {
     if (isAnonymous) {
-      await fetch('/api/qr-logout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.id }),
-      })
+      const { data: sessionData } = await supabase.auth.getSession()
+      const accessToken = sessionData?.session?.access_token
+      if (accessToken) {
+        await fetch('/api/qr-logout', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+        })
+      }
     }
     await supabase.auth.signOut({ scope: 'global' })
     setShowUserMenu(false)
@@ -685,8 +717,10 @@ export default function Dashboard({ user, profile }) {
 
     const res = await fetch('/api/delete-account', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: user.id, access_token: accessToken }),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
     })
 
     if (res.ok) {
@@ -702,11 +736,19 @@ export default function Dashboard({ user, profile }) {
   const signOut = async () => {
     if (isAnonymous) {
       // Anonymous: always destroy everything on any sign out
-      await fetch('/api/qr-logout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.id }),
-      })
+      {
+        const { data: sessionData } = await supabase.auth.getSession()
+        const accessToken = sessionData?.session?.access_token
+        if (accessToken) {
+          await fetch('/api/qr-logout', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${accessToken}`,
+            },
+          })
+        }
+      }
       await supabase.auth.signOut({ scope: 'global' })
     } else {
       await supabase.auth.signOut({ scope: 'local' })
@@ -1098,6 +1140,14 @@ export default function Dashboard({ user, profile }) {
           <div className="undo-bar">
             <span>Clip deleted</span>
             <button onClick={handleUndo}>Undo</button>
+          </div>
+        )}
+
+        {/* Undo bulk delete toast */}
+        {undoBulk && (
+          <div className="undo-bar">
+            <span>{undoBulk.length} clip{undoBulk.length === 1 ? '' : 's'} deleted</span>
+            <button onClick={handleUndoBulk}>Undo</button>
           </div>
         )}
 
