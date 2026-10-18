@@ -679,10 +679,30 @@
 }
 
 /* Clip grid */
+/* Pinned row — equal-width columns; drag-to-reorder lives here. */
 .clip-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 12px;
+}
+
+.clip-grid-pinned {
+  margin-bottom: 12px;
+}
+
+/* Masonry for unpinned clips: CSS multi-column so each card is only as tall as
+   its content (no equal-row-height whitespace). Columns size like the grid's
+   auto-fill (~300px min) and balance automatically. */
+.clip-masonry {
+  column-width: 300px;
+  column-gap: 12px;
+}
+
+.clip-masonry-item {
+  break-inside: avoid;          /* don't split a card across columns */
+  -webkit-column-break-inside: avoid;
+  page-break-inside: avoid;
+  margin-bottom: 12px;          /* vertical gap (column-gap is horizontal only) */
 }
 
 .clip-card-top {
@@ -1401,6 +1421,15 @@
     grid-template-columns: 1fr;
     gap: 10px;
   }
+
+  /* Single column on phones so cards use full width. */
+  .clip-masonry {
+    column-width: auto;
+    column-count: 1;
+    column-gap: 10px;
+  }
+
+  .clip-masonry-item { margin-bottom: 10px; }
 
   .clip-card { padding: 14px; }
 

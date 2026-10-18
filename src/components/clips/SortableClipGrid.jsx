@@ -34,19 +34,33 @@ export default function SortableClipGrid({ pinnedClips, unpinnedClips, renderCli
   }
 
   return (
-    <section className="clip-grid">
+    <>
+      {/* Pinned clips: a normal grid row so drag-to-reorder works (dnd-kit needs
+          a contiguous flow, which a CSS-columns masonry would fragment). */}
       {pinnedClips.length > 0 && (
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <SortableContext items={pinnedClips.map((c) => c.id)} strategy={verticalListSortingStrategy}>
-            {pinnedClips.map((clip) => (
-              <SortableClipCard key={clip.id} clip={clip} renderClip={renderClip} />
-            ))}
-          </SortableContext>
-        </DndContext>
+        <section className="clip-grid clip-grid-pinned">
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+            <SortableContext items={pinnedClips.map((c) => c.id)} strategy={verticalListSortingStrategy}>
+              {pinnedClips.map((clip) => (
+                <SortableClipCard key={clip.id} clip={clip} renderClip={renderClip} />
+              ))}
+            </SortableContext>
+          </DndContext>
+        </section>
       )}
 
-      {unpinnedClips.map((clip) => renderClip(clip, false))}
-    </section>
+      {/* Unpinned clips: a masonry (CSS columns) so each card sizes to its own
+          content with no wasted whitespace between short and tall cards. */}
+      {unpinnedClips.length > 0 && (
+        <section className="clip-masonry">
+          {unpinnedClips.map((clip) => (
+            <div className="clip-masonry-item" key={clip.id}>
+              {renderClip(clip, false)}
+            </div>
+          ))}
+        </section>
+      )}
+    </>
   )
 }
 

@@ -16,16 +16,26 @@ const MS_PER_DAY = 24 * MS_PER_HOUR
 export const SOON_THRESHOLD_MS = 24 * MS_PER_HOUR
 
 /**
- * Duration, in ms, that each expiry preset adds to `now`. The `'none'` preset
- * clears any expiry and maps to `null`.
- * @type {Record<string, number|null>}
+ * Duration, in ms, that each expiry preset adds to `now`.
+ *
+ * There is intentionally NO "never expires" option: Cloudinary storage is
+ * finite, so every file-backed clip must carry an expiry (see DEFAULT_EXPIRY).
+ * Presets cap out at 1 day for the same reason.
+ * @type {Record<string, number>}
  */
 export const EXPIRY_PRESETS = {
   '1h': MS_PER_HOUR,
+  '6h': 6 * MS_PER_HOUR,
+  '12h': 12 * MS_PER_HOUR,
   '1d': MS_PER_DAY,
-  '7d': 7 * MS_PER_DAY,
-  none: null,
 }
+
+/**
+ * The expiry preset applied by default to new file-backed clips (image / audio
+ * / file) when the user doesn't pick one, so uploaded content can never linger
+ * in Cloudinary indefinitely. Text/link clips are not auto-expired.
+ */
+export const DEFAULT_EXPIRY_PRESET = '1d'
 
 /**
  * Coerce a Date, ISO string, or epoch-millis number into epoch milliseconds.
@@ -42,10 +52,10 @@ function toMillis(value) {
 /**
  * Convert a quick expiry preset into an absolute expiry timestamp.
  *
- * @param {'1h'|'1d'|'7d'|'none'} preset - the chosen quick preset
+ * @param {'1h'|'6h'|'12h'|'1d'} preset - the chosen quick preset
  * @param {Date|string|number} [now=new Date()] - the reference "now"
  * @returns {string|null} an ISO-8601 timestamp for `now + preset`, or `null`
- *   for the `'none'` preset (and for any unknown preset).
+ *   for any unknown/absent preset (there is no "no expiry" preset).
  */
 export function presetToExpiry(preset, now = new Date()) {
   const offset = Object.prototype.hasOwnProperty.call(EXPIRY_PRESETS, preset)

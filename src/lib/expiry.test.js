@@ -17,6 +17,8 @@ import {
   formatCountdown,
   isExpiringSoon,
   SOON_THRESHOLD_MS,
+  EXPIRY_PRESETS,
+  DEFAULT_EXPIRY_PRESET,
 } from './expiry.js'
 
 const MINUTE = 60 * 1000
@@ -32,24 +34,41 @@ describe('SOON_THRESHOLD_MS', () => {
   })
 })
 
+describe('presets', () => {
+  it('offers exactly 1h / 6h / 12h / 1d and no "never expires"', () => {
+    expect(Object.keys(EXPIRY_PRESETS).sort()).toEqual(['12h', '1d', '1h', '6h'])
+    expect(EXPIRY_PRESETS).not.toHaveProperty('none')
+    expect(EXPIRY_PRESETS).not.toHaveProperty('7d')
+  })
+
+  it('defaults new file clips to 1 day', () => {
+    expect(DEFAULT_EXPIRY_PRESET).toBe('1d')
+    expect(presetToExpiry(DEFAULT_EXPIRY_PRESET, NOW)).toBe(
+      new Date(NOW.getTime() + DAY).toISOString(),
+    )
+  })
+})
+
 describe('presetToExpiry', () => {
   it('adds 1 hour for the "1h" preset', () => {
     expect(presetToExpiry('1h', NOW)).toBe(new Date(NOW.getTime() + HOUR).toISOString())
+  })
+
+  it('adds 6 hours for the "6h" preset', () => {
+    expect(presetToExpiry('6h', NOW)).toBe(new Date(NOW.getTime() + 6 * HOUR).toISOString())
+  })
+
+  it('adds 12 hours for the "12h" preset', () => {
+    expect(presetToExpiry('12h', NOW)).toBe(new Date(NOW.getTime() + 12 * HOUR).toISOString())
   })
 
   it('adds 1 day for the "1d" preset', () => {
     expect(presetToExpiry('1d', NOW)).toBe(new Date(NOW.getTime() + DAY).toISOString())
   })
 
-  it('adds 7 days for the "7d" preset', () => {
-    expect(presetToExpiry('7d', NOW)).toBe(new Date(NOW.getTime() + 7 * DAY).toISOString())
-  })
-
-  it('returns null for the "none" preset', () => {
+  it('returns null for a removed/unknown preset (no "none" or "7d" anymore)', () => {
     expect(presetToExpiry('none', NOW)).toBeNull()
-  })
-
-  it('returns null for an unknown preset', () => {
+    expect(presetToExpiry('7d', NOW)).toBeNull()
     expect(presetToExpiry('42y', NOW)).toBeNull()
     expect(presetToExpiry(undefined, NOW)).toBeNull()
   })

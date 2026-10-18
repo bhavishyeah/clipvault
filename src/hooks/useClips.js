@@ -5,10 +5,20 @@ import { trackEvent } from '../lib/analytics'
 import { checkRateLimit } from '../lib/rateLimit'
 import { uploadFile, SizeError, UploadAbortedError } from '../lib/uploadFile'
 import { classifyFile, validateFile } from '../lib/fileType'
+import { presetToExpiry, DEFAULT_EXPIRY_PRESET } from '../lib/expiry'
 
 const SUPABASE_BUCKET = 'clips'
 const CLOUDINARY_CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
 const CLOUDINARY_UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
+
+// File-backed clips (image / audio / file) consume finite Cloudinary storage,
+// so they MUST carry an expiry. When the caller doesn't pass an explicit
+// expiry, default to DEFAULT_EXPIRY_PRESET (1 day). Text/link clips are not
+// auto-expired here (they're tiny Postgres rows, not Cloudinary assets).
+function resolveFileExpiry(options) {
+  if (options.expiresAt) return options.expiresAt
+  return presetToExpiry(DEFAULT_EXPIRY_PRESET)
+}
 
 // Public TLDs accepted for a scheme-less "bare host" so plain text like
 // `node.js`, `README.md`, or `file.txt` is NOT mis-typed as a link (which
@@ -268,6 +278,8 @@ export function useClips(user) {
     }
 
     const type = classifyFile(file.type || 'application/octet-stream')
+    // File-backed clips always carry an expiry (default 1 day) to cap storage.
+    const expiresAt = resolveFileExpiry(options)
     const optimisticId = `temp-${Date.now()}`
     const optimistic = {
       id: optimisticId,
@@ -282,7 +294,7 @@ export function useClips(user) {
         bytes: file.size,
       },
       is_pinned: false,
-      expires_at: options.expiresAt || null,
+      expires_at: expiresAt,
       created_at: new Date().toISOString(),
     }
 
@@ -310,7 +322,7 @@ export function useClips(user) {
           name: descriptor.name,
         },
       }
-      if (options.expiresAt) insertData.expires_at = options.expiresAt
+      if (expiresAt) insertData.expires_at = expiresAt
 
       const { error } = await supabase.from('clips').insert(insertData)
 
@@ -380,6 +392,8 @@ export function useClips(user) {
       return
     }
 
+    // Captured images are Cloudinary-backed too → default-expire them.
+    const expiresAt = resolveFileExpiry(options)
     const optimisticId = `temp-${Date.now()}`
     const optimistic = {
       id: optimisticId,
@@ -388,7 +402,7 @@ export function useClips(user) {
       content: null,
       metadata: { provider: 'cloudinary', secure_url: null },
       is_pinned: false,
-      expires_at: options.expiresAt || null,
+      expires_at: expiresAt,
       created_at: new Date().toISOString(),
     }
 
@@ -413,7 +427,7 @@ export function useClips(user) {
           name: options.name || descriptor.name || `shared-image-${Date.now()}`,
         },
       }
-      if (options.expiresAt) insertData.expires_at = options.expiresAt
+      if (expiresAt) insertData.expires_at = expiresAt
 
       const { error } = await supabase.from('clips').insert(insertData)
       if (error) throw new Error(error.message)

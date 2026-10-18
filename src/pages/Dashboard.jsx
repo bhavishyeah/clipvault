@@ -52,12 +52,14 @@ const DATE_WINDOWS = [
   { value: '30d', label: 'Last 30 days', ms: 30 * 24 * 60 * 60 * 1000 },
 ]
 
-// Quick expiry presets offered by the per-clip expiry menu (Req 2.1).
+// Quick expiry presets offered by the per-clip expiry menu. No "never expires"
+// option: file-backed clips consume finite Cloudinary storage, so expiry is
+// mandatory and capped at 1 day (new file clips default to 1 day on save).
 const EXPIRY_MENU = [
   { preset: '1h', label: '1 hour' },
+  { preset: '6h', label: '6 hours' },
+  { preset: '12h', label: '12 hours' },
   { preset: '1d', label: '1 day' },
-  { preset: '7d', label: '7 days' },
-  { preset: 'none', label: 'No expiry' },
 ]
 
 const formatDate = (value) =>
