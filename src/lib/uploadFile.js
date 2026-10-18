@@ -7,7 +7,7 @@
 // specific per-kind endpoint causes Cloudinary to reject non-image POSTs),
 // reports progress, supports cancellation, and aborts after 60s.
 
-import { classifyFile, resourceTypeFor, validateFile, SIZE_LIMITS } from './fileType'
+import { classifyFile, resourceTypeFor, validateFile } from './fileType'
 
 const CLOUDINARY_CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
 const CLOUDINARY_UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
@@ -35,6 +35,7 @@ export class SizeError extends Error {
 /**
  * @typedef {Object} UploadDescriptor
  * @property {string} secure_url - Cloudinary HTTPS URL
+ * @property {string} public_id - Cloudinary public_id (needed for signed delete); null if absent
  * @property {'image' | 'video' | 'auto'} resource_type - endpoint used
  * @property {number} bytes - size reported by Cloudinary
  * @property {string} format - file format reported by Cloudinary
@@ -63,17 +64,28 @@ export async function uploadFile(file, { userId, onProgress, signal } = {}) {
     throw new Error('Upload not configured')
   }
 
-  // Size gate BEFORE opening the request (Req 1.6, 2.1, 2.2).
-  const check = validateFile({ type: file.type, size: file.size })
-  if (!check.ok) {
-    const message =
-      check.reason === 'too_large'
-        ? `File exceeds the ${check.limit === SIZE_LIMITS.audio ? '10' : '15'} MB limit`
-        : 'File is empty'
-    throw new SizeError(message, { reason: check.reason, limit: check.limit })
+  // A string upload value is a remote URL or a `data:` URI. Cloudinary's
+  // unsigned upload fetches/decodes it server-side, so there is no local File
+  // to size-gate — skip the gate and treat it as an image (the only case that
+  // routes here, from received-image ingest). File/Blob uploads fall through to
+  // the normal size gate + MIME classification below.
+  const isRemote = typeof file === 'string'
+
+  if (!isRemote) {
+    // Size gate BEFORE opening the request. On mobile (Android), file.size can
+    // be 0 at pick time — treat as unknown and let the upload attempt proceed.
+    // Cloudinary will reject genuinely empty files at the server level.
+    const check = validateFile({ type: file.type || 'application/octet-stream', size: file.size || 1 })
+    if (!check.ok) {
+      const message =
+        check.reason === 'too_large'
+          ? 'File exceeds the 10 MB limit'
+          : 'File is empty'
+      throw new SizeError(message, { reason: check.reason, limit: check.limit })
+    }
   }
 
-  const kind = classifyFile(file.type)
+  const kind = isRemote ? 'image' : classifyFile(file.type)
 
   const formData = new FormData()
   formData.append('file', file)
@@ -151,10 +163,13 @@ export async function uploadFile(file, { userId, onProgress, signal } = {}) {
   // MIME-derived guess if the response omits it.
   return {
     secure_url: uploaded.secure_url,
+    public_id: uploaded.public_id ?? null,
     resource_type: uploaded.resource_type ?? resourceTypeFor(kind),
     bytes: uploaded.bytes,
     format: uploaded.format,
-    mime: file.type,
-    name: file.name,
+    // A string upload has no local File metadata; derive MIME from the format
+    // Cloudinary reports and leave name to the caller (ingest supplies its own).
+    mime: isRemote ? (uploaded.format ? `image/${uploaded.format}` : 'image/*') : file.type,
+    name: isRemote ? undefined : file.name,
   }
 }

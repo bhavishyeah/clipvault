@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabaseClient'
-import { IconVault } from '../ui/Icons'
+import BrandVideo from '../ui/BrandVideo'
 
 async function confirmAndLogin(token) {
   // Call API to create anonymous user and confirm the QR session
@@ -12,14 +12,15 @@ async function confirmAndLogin(token) {
 
   const data = await res.json()
 
-  if (!res.ok || !data.success) {
+  if (!res.ok || !data.success || !data.token_hash) {
     return { ok: false, error: data.error || 'Failed to connect' }
   }
 
-  // Sign in as the anonymous user on this device (phone)
-  const { error: signInError } = await supabase.auth.signInWithPassword({
-    email: data.email,
-    password: data.password,
+  // Sign in on this device (phone) with the one-time magiclink token_hash.
+  // No password crosses the wire.
+  const { error: signInError } = await supabase.auth.verifyOtp({
+    token_hash: data.token_hash,
+    type: 'email',
   })
 
   if (signInError) {
@@ -58,7 +59,7 @@ export default function QRConfirmPage({ token, onDone }) {
   return (
     <main className="auth-page">
       <section className="auth-card">
-        <div className="auth-logo"><IconVault width="24" height="24" /></div>
+        <div className="auth-logo"><BrandVideo className="auth-logo-video" /></div>
 
         {status === 'confirming' && (
           <>

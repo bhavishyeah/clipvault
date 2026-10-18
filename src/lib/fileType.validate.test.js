@@ -6,8 +6,9 @@
 //
 // Property 3 has two halves:
 //   (a) Acceptance boundary — for any file, validateFile accepts iff size > 0
-//       and size is at most the limit for its classification (15,728,640 for
-//       'file', 10,485,760 for 'audio'). Images have no size gate.
+//       and size is at most the uniform 10 MB limit (10,485,760) that applies
+//       to every classification (image, audio, file) to match the Cloudinary
+//       plan's hard cap.
 //   (b) Pre-upload ordering — whenever validateFile rejects a file, the upload
 //       function is never invoked. A small caller shim runs validateFile and
 //       only calls the (mocked) upload fn when ok is true.
@@ -27,12 +28,11 @@ function maybeUpload(file, uploadFn) {
   return result
 }
 
-// Expected limit for a given MIME classification. `null` means "no size gate".
+// Expected limit for a given MIME classification. Every kind — image, audio,
+// and file — is now gated at the same uniform 10 MB ceiling.
 function limitFor(mime) {
   const kind = classifyFile(mime)
-  if (kind === 'audio') return SIZE_LIMITS.audio
-  if (kind === 'file') return SIZE_LIMITS.file
-  return null // image: unlimited
+  return SIZE_LIMITS[kind] ?? SIZE_LIMITS.file
 }
 
 // A generator that produces a representative spread of MIME types across all
@@ -79,7 +79,7 @@ describe('Property 3: Size-limit gate and pre-upload ordering', () => {
         const withinGate =
           Number.isFinite(bytes) &&
           bytes > 0 &&
-          (limit === null || bytes <= limit)
+          bytes <= limit
 
         const result = validateFile({ type, size })
         expect(result.ok).toBe(withinGate)
@@ -118,16 +118,15 @@ describe('Property 3: Size-limit gate and pre-upload ordering', () => {
     )
   })
 
-  it('images bypass the size gate (accepted at any positive size)', () => {
-    fc.assert(
-      fc.property(
-        fc.constantFrom('image/png', 'image/jpeg', 'image/webp'),
-        fc.integer({ min: 1, max: 500_000_000 }),
-        (type, size) => {
-          expect(validateFile({ type, size }).ok).toBe(true)
-        },
-      ),
-      { numRuns: RUNS },
-    )
+  it('gates images at the uniform 10 MB cap (accepted at the limit, rejected just over)', () => {
+    for (const type of ['image/png', 'image/jpeg', 'image/webp']) {
+      // Exactly at the limit is accepted.
+      expect(validateFile({ type, size: SIZE_LIMITS.image }).ok).toBe(true)
+      // One byte over the limit is rejected as too_large.
+      const over = validateFile({ type, size: SIZE_LIMITS.image + 1 })
+      expect(over.ok).toBe(false)
+      expect(over.reason).toBe('too_large')
+      expect(over.limit).toBe(SIZE_LIMITS.image)
+    }
   })
 })

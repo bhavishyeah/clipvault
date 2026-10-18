@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { supabase } from '../../lib/supabaseClient'
-import { IconVault } from '../ui/Icons'
+import BrandVideo from '../ui/BrandVideo'
 
 export default function ResetPassword({ onDone }) {
   const [password, setPassword] = useState('')
@@ -24,7 +24,7 @@ export default function ResetPassword({ onDone }) {
   return (
     <main className="auth-page">
       <section className="auth-card">
-        <div className="auth-logo"><IconVault width="24" height="24" /></div>
+        <div className="auth-logo"><BrandVideo className="auth-logo-video" /></div>
         <h1>Set new password</h1>
         <p className="auth-subtitle">Choose a strong password for your vault</p>
 

@@ -1,47 +1,47 @@
 // VOLT — App-level recovery-code elevation marker
 //
-// Supabase MFA can only reach AAL2 through `mfa.verify` against an enrolled
-// TOTP factor; a recovery code cannot drive that API. Per design
-// ("Recovery-code elevation tradeoff", approach 1) we keep an app-level marker
-// for the session when a valid recovery code is accepted. `canAccessVault`
-// treats this the same as `aal2`. The marker is scoped to the current session's
-// access token so it does not leak across sign-ins, and lives in sessionStorage
-// so it clears when the tab/browser session ends.
-//
-// This unlocks only the client vault gate; the true data boundary remains the
-// per-row `user_id` RLS on user-owned tables, which is unaffected.
+// Supabase MFA cannot mint AAL2 from an app-managed recovery code, so a valid
+// recovery code records an app-level elevation for the current auth session.
+// The marker is keyed to the JWT's stable session_id rather than the rotating
+// access token, so a normal TOKEN_REFRESHED event does not destroy elevation
+// or unmount Dashboard while Android's native file picker is open.
 
 const KEY = 'volt.recovery-aal2'
 
-/**
- * Mark the given session (identified by its access token) as recovery-elevated.
- * @param {string} accessToken - the current session's access token
- */
-export function markRecoveryElevated(accessToken) {
-  if (!accessToken) return
+function sessionKey(accessToken) {
+  if (!accessToken) return null
   try {
-    sessionStorage.setItem(KEY, accessToken)
+    const payload = accessToken.split('.')[1]
+    if (!payload) return accessToken
+    const base64 = payload.replace(/-/g, '+').replace(/_/g, '/')
+    const claims = JSON.parse(atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, '=')))
+    return claims?.session_id || accessToken
   } catch {
-    // sessionStorage unavailable (private mode / SSR) — elevation simply
-    // won't persist; the caller can still proceed in-memory this render.
+    // Preserve compatibility with opaque/test tokens.
+    return accessToken
   }
 }
 
-/**
- * Whether the given session has an app-level recovery elevation marker.
- * @param {string} accessToken - the current session's access token
- * @returns {boolean}
- */
-export function isRecoveryElevated(accessToken) {
-  if (!accessToken) return false
+export function markRecoveryElevated(accessToken) {
+  const key = sessionKey(accessToken)
+  if (!key) return
   try {
-    return sessionStorage.getItem(KEY) === accessToken
+    sessionStorage.setItem(KEY, key)
+  } catch {
+    // Storage unavailable — elevation simply will not persist across renders.
+  }
+}
+
+export function isRecoveryElevated(accessToken) {
+  const key = sessionKey(accessToken)
+  if (!key) return false
+  try {
+    return sessionStorage.getItem(KEY) === key
   } catch {
     return false
   }
 }
 
-/** Clear any recovery elevation marker (e.g. on sign-out). */
 export function clearRecoveryElevated() {
   try {
     sessionStorage.removeItem(KEY)

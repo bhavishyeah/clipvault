@@ -16,11 +16,19 @@ export default function MobilePasteBox({ onSave, onImage, saving }) {
     setText('')
   }
 
-  const handleImagePick = (e) => {
-    const file = e.target.files?.[0]
-    e.target.value = ''
+  const handleImagePick = async (event) => {
+    const input = event.currentTarget
+    const file = input.files?.[0]
     if (!file) return
-    onImage(file)
+
+    // Keep the selected Android File attached to its native input throughout
+    // the upload. Some content providers revoke lazy content:// access when
+    // input.value is cleared before the file is consumed.
+    try {
+      await onImage(file)
+    } finally {
+      input.value = ''
+    }
   }
 
   return (
@@ -46,10 +54,8 @@ export default function MobilePasteBox({ onSave, onImage, saving }) {
       <div className="mobile-paste-footer">
         <span>{text.length}/10000</span>
         <div className="mobile-paste-actions">
-          {/* Use a <label> linked to the file input via htmlFor instead of a
-              button with onClick(.click()). This avoids the Android PWA bug
-              where programmatic .click() triggers a navigation/popstate event
-              that the Service Worker intercepts, resetting the page. */}
+          {/* Native label/input activation avoids a programmatic click and
+              keeps Android content-provider behavior consistent. */}
           <label
             htmlFor={MOBILE_INPUT_ID}
             className="mobile-image-btn"

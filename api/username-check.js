@@ -1,21 +1,32 @@
 // GET /api/username-check?username=xxx — Check if username is available
 
 import { createClient } from '@supabase/supabase-js'
+import { rateLimit, clientIp } from '../lib/rateLimit.js'
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 )
 
+const APP_ORIGIN = process.env.VITE_APP_ORIGIN || 'https://clipvault-lilac.vercel.app'
+
 const USERNAME_REGEX = /^[a-zA-Z0-9_]{3,20}$/
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Origin', APP_ORIGIN)
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
 
   if (req.method === 'OPTIONS') return res.status(200).end()
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' })
+
+  // Rate limit per client IP to stop fast username enumeration. Generous
+  // because the onboarding UI checks as the user types.
+  const rl = rateLimit(`username-check:${clientIp(req)}`, { limit: 60, windowMs: 60_000 })
+  if (!rl.allowed) {
+    res.setHeader('Retry-After', String(rl.retryAfterSec))
+    return res.status(429).json({ error: 'Too many requests' })
+  }
 
   const { username } = req.query
 

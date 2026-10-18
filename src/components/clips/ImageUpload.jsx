@@ -8,16 +8,24 @@ const INPUT_ID = 'vault-file-upload'
 export default function ImageUpload({ onImage, saving }) {
   const [dragOver, setDragOver] = useState(false)
 
-  const handleFileChange = (e) => {
-    const file = e.target.files?.[0]
-    // Reset input so the same file can be re-selected
-    e.target.value = ''
+  const handleFileChange = async (event) => {
+    const input = event.currentTarget
+    const file = input.files?.[0]
     if (!file) return
+
     if (file.size > MAX_SIZE) {
       toast('File must be under 15MB', 'error')
+      input.value = ''
       return
     }
-    onImage(file)
+
+    // Keep the native input populated until the Android content-backed File
+    // has been consumed. Clearing it first can revoke a lazy content:// grant.
+    try {
+      await onImage(file)
+    } finally {
+      input.value = ''
+    }
   }
 
   const handleDrop = (e) => {
@@ -42,10 +50,9 @@ export default function ImageUpload({ onImage, saving }) {
       aria-label="Upload a file"
       style={{ cursor: saving ? 'not-allowed' : 'pointer' }}
     >
-      {/* Native file input — linked via label htmlFor so the browser opens the
-          picker without a JS .click() call, avoiding the Android PWA reload bug
-          where programmatic .click() triggers a popstate/navigation event that
-          the Service Worker intercepts and resets the page. */}
+      {/* Native label/input activation avoids a programmatic click and keeps
+          the selected Android content-backed File owned by this input until
+          handleFileChange finishes consuming it. */}
       <input
         id={INPUT_ID}
         type="file"

@@ -4,14 +4,24 @@ import { toast } from '../components/ui/toastStore'
 import { trackEvent } from '../lib/analytics'
 import { checkRateLimit } from '../lib/rateLimit'
 import { uploadFile, SizeError } from '../lib/uploadFile'
-import { classifyFile, validateFile, SIZE_LIMITS } from '../lib/fileType'
+import { classifyFile, validateFile } from '../lib/fileType'
 
 const SUPABASE_BUCKET = 'clips'
 const CLOUDINARY_CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
 const CLOUDINARY_UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
 
-const isUrl = (text) =>
-  /^(https?:\/\/)?[\w.-]+\.[a-z]{2,}([/?#].*)?$/i.test(text)
+// Public TLDs accepted for a scheme-less "bare host" so plain text like
+// `node.js`, `README.md`, or `file.txt` is NOT mis-typed as a link (which
+// would trigger spurious link-preview fetches). Treat as a URL only when it
+// has an explicit http(s) scheme, a `www.` prefix, or a host ending in a
+// recognized public TLD (optionally with a path/query/fragment).
+const URL_TLD_ALLOWLIST =
+  '(?:com|org|net|io|dev|app|co|edu|gov|me|ai|xyz|gg|to|ly|sh|so)'
+const URL_RE = new RegExp(
+  `^(?:https?:\\/\\/\\S+|www\\.\\S+|[\\w-]+(?:\\.[\\w-]+)*\\.${URL_TLD_ALLOWLIST}(?:[/?#]\\S*)?)$`,
+  'i',
+)
+const isUrl = (text) => URL_RE.test(String(text ?? '').trim())
 
 function sortClips(list) {
   return [...list].sort((a, b) => {
@@ -241,15 +251,15 @@ export function useClips(user) {
       return
     }
 
-    // Size gate BEFORE any upload (Req 1.6). No clip is inserted on rejection.
-    const check = validateFile({ type: file.type, size: file.size })
-    if (!check.ok) {
-      const message =
-        check.reason === 'too_large'
-          ? `File exceeds the ${check.limit === SIZE_LIMITS.audio ? '10' : '15'} MB limit`
-          : 'File is empty'
-      toast(message, 'error')
-      return
+    // Android content providers may report size=0 while the selected File is
+    // still valid. Enforce limits only when a positive size is known; the
+    // upload service also validates the server-bound file.
+    if (file.size > 0) {
+      const check = validateFile({ type: file.type || 'application/octet-stream', size: file.size })
+      if (!check.ok) {
+        toast('File exceeds the 10 MB limit', 'error')
+        return
+      }
     }
 
     if (!checkRateLimit('save', 5, 10000)) {
@@ -257,7 +267,7 @@ export function useClips(user) {
       return
     }
 
-    const type = classifyFile(file.type)
+    const type = classifyFile(file.type || 'application/octet-stream')
     const optimisticId = `temp-${Date.now()}`
     const optimistic = {
       id: optimisticId,
@@ -292,6 +302,7 @@ export function useClips(user) {
         metadata: {
           provider: 'cloudinary',
           secure_url: descriptor.secure_url,
+          public_id: descriptor.public_id,
           resource_type: descriptor.resource_type,
           bytes: descriptor.bytes,
           format: descriptor.format,
@@ -308,13 +319,8 @@ export function useClips(user) {
       toast(type === 'image' ? 'Image saved' : type === 'audio' ? 'Audio saved' : 'File saved')
       trackEvent(type === 'image' ? 'save_image' : 'save_file')
     } catch (err) {
-      // Roll back the optimistic entry — nothing is stored on failure (Req 1.7).
       setClips((prev) => prev.filter((c) => c.id !== optimisticId))
-      if (err instanceof SizeError) {
-        toast(err.message, 'error')
-      } else {
-        toast(`Failed to upload ${type === 'image' ? 'image' : 'file'}`, 'error')
-      }
+      toast(err instanceof SizeError ? err.message : `Upload error: ${err.message}`, 'error')
       console.error('Could not save file:', err.message)
     } finally {
       setSaving(false)
@@ -345,6 +351,75 @@ export function useClips(user) {
     return saveFile(file, options)
   }, [saveFile])
 
+  // --- Save an image from a URL or data: URI (share target / captured link) ---
+  // The Web Share Target and pasted image links deliver an image "by reference"
+  // (an http(s) image URL or a data:image URI) rather than a File. Cloudinary's
+  // unsigned upload fetches/decodes such a string server-side, so uploadFile
+  // accepts it directly. The result is a real, owned image clip — identical in
+  // shape to saveFile's — not a brittle link clip.
+  const saveImageFromUrl = useCallback(async (imageRef, options = {}) => {
+    if (!imageRef || !user) return
+
+    if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) {
+      toast('Upload not configured', 'error')
+      return
+    }
+
+    if (!checkRateLimit('save', 5, 10000)) {
+      toast('Slow down — too many saves at once', 'error')
+      return
+    }
+
+    const optimisticId = `temp-${Date.now()}`
+    const optimistic = {
+      id: optimisticId,
+      user_id: user.id,
+      type: 'image',
+      content: null,
+      metadata: { provider: 'cloudinary', secure_url: null },
+      is_pinned: false,
+      expires_at: options.expiresAt || null,
+      created_at: new Date().toISOString(),
+    }
+
+    setSaving(true)
+    setUploadProgress(0)
+    setClips((prev) => sortClips([optimistic, ...prev]))
+
+    try {
+      const descriptor = await uploadFile(imageRef, { userId: user.id })
+
+      const insertData = {
+        user_id: user.id,
+        type: 'image',
+        metadata: {
+          provider: 'cloudinary',
+          secure_url: descriptor.secure_url,
+          public_id: descriptor.public_id,
+          resource_type: descriptor.resource_type,
+          bytes: descriptor.bytes,
+          format: descriptor.format,
+          mime: descriptor.mime,
+          name: options.name || descriptor.name || `shared-image-${Date.now()}`,
+        },
+      }
+      if (options.expiresAt) insertData.expires_at = options.expiresAt
+
+      const { error } = await supabase.from('clips').insert(insertData)
+      if (error) throw new Error(error.message)
+
+      toast('Image saved')
+      trackEvent('save_image')
+    } catch (err) {
+      setClips((prev) => prev.filter((c) => c.id !== optimisticId))
+      toast(`Could not save image: ${err.message}`, 'error')
+      console.error('Could not save image from url:', err.message)
+    } finally {
+      setSaving(false)
+      setUploadProgress(0)
+    }
+  }, [user])
+
   // --- Remove clip (optimistic) ---
   const removeClip = useCallback(async (clip) => {
     setClips((prev) => prev.filter((c) => c.id !== clip.id))
@@ -362,7 +437,38 @@ export function useClips(user) {
       await supabase.storage.from(SUPABASE_BUCKET).remove([clip.file_path])
     }
 
-    // TODO: Delete Cloudinary asset server-side (requires secure backend endpoint)
+    // Best-effort server-side Cloudinary asset cleanup. Deletion requires the
+    // Cloudinary API secret to sign a `destroy` call, so it MUST happen on the
+    // server (/api/delete-asset), never in the browser. The DB row is already
+    // gone at this point, so this is fire-and-forget: any failure is logged but
+    // never blocks the delete UX or rolls the clip back — the asset can be
+    // reaped later, but a stuck asset must not resurrect a deleted clip.
+    if (
+      clip.metadata?.provider === 'cloudinary' &&
+      (clip.metadata?.public_id || clip.metadata?.secure_url)
+    ) {
+      try {
+        const { data } = await supabase.auth.getSession()
+        const token = data?.session?.access_token
+        if (token) {
+          await fetch('/api/delete-asset', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              public_id: clip.metadata.public_id,
+              resource_type: clip.metadata.resource_type,
+              secure_url: clip.metadata.secure_url,
+            }),
+          })
+        }
+      } catch (err) {
+        // Best-effort only — never disrupt the delete flow.
+        console.error('Cloudinary asset cleanup failed:', err?.message || err)
+      }
+    }
 
     trackEvent('delete')
   }, [])
@@ -426,6 +532,58 @@ export function useClips(user) {
     }
   }, [])
 
+  // --- Set tags on an existing clip ---
+  // Tags live in `clips.metadata.tags` (no schema migration). The new tag list
+  // is merged into the clip's existing metadata so unrelated metadata keys
+  // (provider/secure_url/mime/preview/…) are preserved. Uses the same
+  // optimistic-update / rollback-on-error pattern as setExpiration. Tags are
+  // owner-private metadata; RLS on `clips` already scopes reads to the owner.
+  const setTags = useCallback(async (clip, tags) => {
+    const nextTags = Array.isArray(tags) ? tags : []
+    const nextMetadata = { ...(clip.metadata ?? {}), tags: nextTags }
+    const updated = { ...clip, metadata: nextMetadata }
+
+    setClips((prev) => prev.map((c) => (c.id === clip.id ? updated : c)))
+
+    const { error } = await supabase
+      .from('clips')
+      .update({ metadata: nextMetadata })
+      .eq('id', clip.id)
+
+    if (error) {
+      setClips((prev) => prev.map((c) => (c.id === clip.id ? clip : c)))
+      toast('Failed to update tags', 'error')
+      console.error('Could not update tags:', error.message)
+    }
+  }, [])
+
+  // --- Cache a fetched link preview on an existing clip ---
+  // Rich link previews (title/description/image) live in
+  // `clips.metadata.preview` (no schema migration — Req 4.2). The preview is
+  // merged into the clip's existing metadata so unrelated keys (tags/provider/
+  // secure_url/…) are preserved. Unlike setTags/setExpiration this write is
+  // best-effort background caching triggered on first view of a link clip: it
+  // updates local state so the card re-renders with the preview, but on a
+  // persistence error it silently keeps the local (in-memory) preview and does
+  // NOT toast or roll back — a failed cache write must never disrupt the vault
+  // (the preview simply re-fetches on a later view). RLS scopes the update to
+  // the owner.
+  const setPreview = useCallback(async (clip, preview) => {
+    const nextMetadata = { ...(clip.metadata ?? {}), preview }
+    const updated = { ...clip, metadata: nextMetadata }
+
+    setClips((prev) => prev.map((c) => (c.id === clip.id ? updated : c)))
+
+    const { error } = await supabase
+      .from('clips')
+      .update({ metadata: nextMetadata })
+      .eq('id', clip.id)
+
+    if (error) {
+      console.error('Could not cache link preview:', error.message)
+    }
+  }, [])
+
   // --- Reorder pinned clips (drag-and-drop) ---
   const reorderPins = useCallback(async (reorderedPinnedClips) => {
     // Optimistic: apply new order immediately
@@ -462,10 +620,13 @@ export function useClips(user) {
     saveText,
     saveFile,
     saveImage,
+    saveImageFromUrl,
     removeClip,
     togglePin,
     editClip,
     setExpiration,
+    setTags,
+    setPreview,
     reorderPins,
     refresh,
   }

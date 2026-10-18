@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { supabase } from '../../lib/supabaseClient'
 import { needsMfaChallenge } from '../../lib/mfa'
-import { IconVault } from '../ui/Icons'
+import BrandVideo from '../ui/BrandVideo'
 import QRLogin from './QRLogin'
 import MfaChallenge from './MfaChallenge'
 
@@ -93,7 +93,7 @@ export default function Login() {
 
           {/* Right: Form */}
           <div className="auth-form-section">
-            <div className="auth-logo"><IconVault width="24" height="24" /></div>
+            <div className="auth-logo"><BrandVideo className="auth-logo-video" /></div>
             <h1>{isReset ? 'Reset password' : isSignup ? 'Create account' : 'Sign in'}</h1>
             <p className="auth-subtitle">
               {isReset ? "We'll send you a reset link" : isSignup ? 'Start your private clipboard vault' : 'Use email and password'}

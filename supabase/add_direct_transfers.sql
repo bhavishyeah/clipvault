@@ -5,12 +5,13 @@ CREATE TABLE IF NOT EXISTS public.direct_transfers (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   sender_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   recipient_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  type text NOT NULL CHECK (type IN ('text', 'link', 'image')),
+  type text NOT NULL CHECK (type IN ('text', 'link', 'image', 'file', 'audio')),
   content text,
   file_url text,
   file_name text,
   file_size integer,
   mime_type text,
+  group_name text,
   status text NOT NULL DEFAULT 'pending',
   created_at timestamptz NOT NULL DEFAULT now(),
   delivered_at timestamptz,
@@ -20,20 +21,25 @@ CREATE TABLE IF NOT EXISTS public.direct_transfers (
 ALTER TABLE public.direct_transfers ENABLE ROW LEVEL SECURITY;
 
 -- Sender can see and manage their sent transfers
+DROP POLICY IF EXISTS "sender can view own transfers" ON public.direct_transfers;
 CREATE POLICY "sender can view own transfers" ON public.direct_transfers
   FOR SELECT USING (auth.uid() = sender_id);
 
+DROP POLICY IF EXISTS "sender can insert transfers" ON public.direct_transfers;
 CREATE POLICY "sender can insert transfers" ON public.direct_transfers
   FOR INSERT WITH CHECK (auth.uid() = sender_id);
 
+DROP POLICY IF EXISTS "sender can delete own transfers" ON public.direct_transfers;
 CREATE POLICY "sender can delete own transfers" ON public.direct_transfers
   FOR DELETE USING (auth.uid() = sender_id);
 
 -- Recipient can see transfers sent to them
+DROP POLICY IF EXISTS "recipient can view incoming" ON public.direct_transfers;
 CREATE POLICY "recipient can view incoming" ON public.direct_transfers
   FOR SELECT USING (auth.uid() = recipient_id);
 
 -- Recipient can update status (mark as delivered)
+DROP POLICY IF EXISTS "recipient can update status" ON public.direct_transfers;
 CREATE POLICY "recipient can update status" ON public.direct_transfers
   FOR UPDATE USING (auth.uid() = recipient_id);
 
@@ -48,4 +54,14 @@ CREATE INDEX IF NOT EXISTS transfers_expires_idx
   ON public.direct_transfers (expires_at);
 
 -- Enable realtime for instant delivery notifications
-ALTER PUBLICATION supabase_realtime ADD TABLE public.direct_transfers;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime'
+      AND schemaname = 'public'
+      AND tablename = 'direct_transfers'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.direct_transfers;
+  END IF;
+END $$;
