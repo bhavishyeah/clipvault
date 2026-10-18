@@ -1,8 +1,11 @@
 import { useState } from 'react'
 import { toast } from '../ui/toastStore'
 import { IconUpload } from '../ui/Icons'
+import { MAX_UPLOAD_BYTES } from '../../lib/fileType'
 
-const MAX_SIZE = 15 * 1024 * 1024 // 15MB
+// Uniform 10 MB cap, shared with the size gate in lib/fileType.js so this
+// zone and the upload path never disagree (and match the Cloudinary plan cap).
+const MAX_SIZE = MAX_UPLOAD_BYTES
 const INPUT_ID = 'vault-file-upload'
 
 export default function ImageUpload({ onImage, saving }) {
@@ -14,7 +17,7 @@ export default function ImageUpload({ onImage, saving }) {
     if (!file) return
 
     if (file.size > MAX_SIZE) {
-      toast('File must be under 15MB', 'error')
+      toast('File must be under 10 MB', 'error')
       input.value = ''
       return
     }
@@ -34,7 +37,7 @@ export default function ImageUpload({ onImage, saving }) {
     const file = e.dataTransfer.files?.[0]
     if (!file) return
     if (file.size > MAX_SIZE) {
-      toast('File must be under 15MB', 'error')
+      toast('File must be under 10 MB', 'error')
       return
     }
     onImage(file)
@@ -70,7 +73,7 @@ export default function ImageUpload({ onImage, saving }) {
             {saving ? 'Uploading…' : 'Upload file'}
           </p>
           <p className="image-upload-hint">
-            Drop any file here or tap to browse. Max 15MB.
+            Drop any file here or tap to browse. Max 10 MB.
           </p>
         </div>
       </div>

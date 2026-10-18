@@ -766,18 +766,44 @@ export default function Dashboard({ user, profile }) {
     }
     setConvertBusy(true)
 
-    const { error } = await supabase.auth.updateUser({
-      email,
+    // Anonymous accounts carry a synthetic `anon-<uuid>@volt.temp` email. With
+    // Supabase "Secure email change" enabled, changing the email tries to send
+    // a confirmation to BOTH the old and new address — and the old fake @volt.temp
+    // address is rejected as invalid, breaking a combined updateUser({ email, ... }).
+    //
+    // So we do it in two steps:
+    //   1. Set the password + clear the anonymous flag WITHOUT touching email.
+    //      This succeeds immediately and makes the clips permanent (same user id).
+    //   2. Request the real email as a change. Supabase sends a confirmation link
+    //      to the new Gmail address; the user clicks it to finish linking the
+    //      email. Their vault is already permanent regardless.
+    const { error: passErr } = await supabase.auth.updateUser({
       password: convertPassword,
       data: { is_anonymous: false },
     })
 
-    if (error) {
-      setConvertError(error.message)
-    } else {
-      toast('Account created! Your clips are now permanent.')
-      setShowConvert(false)
+    if (passErr) {
+      setConvertError(passErr.message)
+      setConvertBusy(false)
+      return
     }
+
+    const { error: emailErr } = await supabase.auth.updateUser({ email })
+
+    if (emailErr) {
+      // The account is already permanent (password set, anon flag cleared); only
+      // the email link failed. Surface it but don't present the whole thing as a
+      // failure, since their clips are safe.
+      setConvertError(
+        `Account secured, but we couldn't set that email: ${emailErr.message}. ` +
+        `You can set it later from settings.`
+      )
+      setConvertBusy(false)
+      return
+    }
+
+    toast('Account secured. Check your email to confirm your address.')
+    setShowConvert(false)
     setConvertBusy(false)
   }
 
