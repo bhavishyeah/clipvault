@@ -1617,6 +1617,47 @@
   transform: none;
 }
 
+/* --------------------------------------------------------------------------
+   Hover-reveal chrome: the tag editor and the bottom action row stay hidden
+   until the card is hovered or focused, so an idle grid reads as clean content
+   cards. The card keeps a stable height (no layout jump) by reserving the row
+   via max-height/opacity rather than display:none. On touch devices (no hover)
+   the chrome is always shown, since there is no hover to trigger it.
+   -------------------------------------------------------------------------- */
+.clip-card .tag-editor,
+.clip-card .clip-card-bottom {
+  opacity: 0;
+  transition: opacity .15s ease;
+}
+
+.clip-card:hover .tag-editor,
+.clip-card:focus-within .tag-editor,
+.clip-card:hover .clip-card-bottom,
+.clip-card:focus-within .clip-card-bottom {
+  opacity: 1;
+}
+
+/* A clip that already has tags shows them even when idle (they're content, not
+   chrome); only the "+ tag" affordance is hover-gated via .tag-editor opacity.
+   Keep tagged clips legible at rest. */
+.clip-card .tag-editor:has(.tag-chip) {
+  opacity: 1;
+}
+
+/* Touch / no-hover devices: always reveal (no hover state exists). */
+@media (hover: none) {
+  .clip-card .tag-editor,
+  .clip-card .clip-card-bottom {
+    opacity: 1;
+  }
+}
+
+/* Selected (bulk mode) cards always show their chrome too. */
+.clip-card.selected .tag-editor,
+.clip-card.selected .clip-card-bottom {
+  opacity: 1;
+}
+
 /* ==========================================================================
    Error Boundary
    ========================================================================== */
@@ -2943,7 +2984,21 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  margin-top: 10px;
+  margin-top: 8px;
+  min-height: 24px; /* reserve one row so hover-reveal doesn't shift layout */
+}
+
+/* An untagged editor (only the "+ tag" affordance) collapses at rest so it
+   never leaves an empty full-width gap; it expands on hover with the chrome. */
+.tag-editor:not(:has(.tag-chip)) {
+  margin-top: 0;
+  min-height: 0;
+}
+
+.clip-card:hover .tag-editor:not(:has(.tag-chip)),
+.clip-card:focus-within .tag-editor:not(:has(.tag-chip)) {
+  margin-top: 8px;
+  min-height: 24px;
 }
 
 .tag-chip {

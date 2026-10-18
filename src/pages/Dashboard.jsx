@@ -31,7 +31,7 @@ import InsightsPanel from '../components/insights/InsightsPanel'
 import BrandVideo from '../components/ui/BrandVideo'
 import {
   IconCopy, IconTrash, IconEdit, IconPin, IconPinFilled,
-  IconDownload, IconExternalLink, IconSearch, IconImage, IconText, IconLink,
+  IconDownload, IconExternalLink, IconSearch, IconLink,
   IconSun, IconMoon, IconLogOut, IconMenu, IconGrip, IconClock,
   IconInfinity, IconCheck, IconClipboard, IconQr,
 } from '../components/ui/Icons'
@@ -857,12 +857,6 @@ export default function Dashboard({ user, profile }) {
     if (ok && groupId === manageGroupId) setManageGroupId(null)
   }, [leaveGroup, manageGroupId])
 
-  const getTypeIcon = (type) => {
-    if (type === 'image') return <IconImage />
-    if (type === 'link') return <IconLink />
-    return <IconText />
-  }
-
   // Empty state messages (Req 5.4). When any search/filter is active, the empty
   // state names exactly what was searched and which constraints are applied so
   // "no results" is never mistaken for an empty vault. When nothing is active,
@@ -1069,7 +1063,6 @@ export default function Dashboard({ user, profile }) {
                 <div className="clip-card-top">
                   {bulkMode && <span className={`bulk-checkbox ${selectedIds.has(clip.id) ? 'checked' : ''}`}>{selectedIds.has(clip.id) && <IconCheck />}</span>}
                   {isPinned && !bulkMode && <button className="drag-handle" title="Drag to reorder" {...dragListeners}><IconGrip /></button>}
-                  <span className="type-pill"><span className="type-symbol">{getTypeIcon(clip.type)}</span>{clip.type}</span>
                   <div className="clip-card-top-actions">
                     {getShare(clip.id) && <span className="shared-badge" title="Shared publicly"><IconLink /></span>}
                     {clip.expires_at && (
@@ -1097,11 +1090,16 @@ export default function Dashboard({ user, profile }) {
                   <div className="clip-card-bottom">
                     <time>{formatDate(clip.created_at)}</time>
                     <div className="clip-actions">
-                      <button onClick={() => copyClip(clip)} title="Copy"><IconCopy /></button>
+                      {/* Copy only makes sense for text/link content, not binaries. */}
+                      {(clip.type === 'text' || clip.type === 'link') && (
+                        <button onClick={() => copyClip(clip)} title="Copy"><IconCopy /></button>
+                      )}
                       <button onClick={() => setQrClip(clip)} title="Show QR code" aria-label="Show QR code"><IconQr /></button>
-                      {clip.type !== 'image' && <button onClick={() => handleEditClick(clip)} title="Edit"><IconEdit /></button>}
+                      {(clip.type === 'text' || clip.type === 'link') && <button onClick={() => handleEditClick(clip)} title="Edit"><IconEdit /></button>}
                       {clip.type === 'link' && <button onClick={() => openLink(clip.content)} title="Open"><IconExternalLink /></button>}
-                      {(clip.type === 'image' || clip.type === 'file' || clip.type === 'audio') && <button onClick={() => downloadClip(clip)} title="Download"><IconDownload /></button>}
+                      {/* Download: only images need it here — file/audio have their own
+                          download control inside FileCard (avoids a duplicate button). */}
+                      {clip.type === 'image' && <button onClick={() => downloadClip(clip)} title="Download"><IconDownload /></button>}
                       <div className="share-action-wrap">
                         <button
                           className={`share-action ${getShare(clip.id) ? 'shared' : ''}`}
