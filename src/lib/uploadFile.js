@@ -7,7 +7,7 @@
 // specific per-kind endpoint causes Cloudinary to reject non-image POSTs),
 // reports progress, supports cancellation, and aborts after 60s.
 
-import { classifyFile, resourceTypeFor, validateFile, SIZE_LIMITS } from './fileType'
+import { classifyFile, resourceTypeFor, validateFile } from './fileType'
 
 const CLOUDINARY_CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
 const CLOUDINARY_UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
@@ -79,7 +79,7 @@ export async function uploadFile(file, { userId, onProgress, signal } = {}) {
     if (!check.ok) {
       const message =
         check.reason === 'too_large'
-          ? `File exceeds the ${check.limit === SIZE_LIMITS.audio ? '10' : '15'} MB limit`
+          ? 'File exceeds the 10 MB limit'
           : 'File is empty'
       throw new SizeError(message, { reason: check.reason, limit: check.limit })
     }

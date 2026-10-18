@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabaseClient'
 import { toast } from '../components/ui/toastStore'
 import { trackEvent } from '../lib/analytics'
 import { validateGroupName } from '../lib/group'
-import { validateFile, SIZE_LIMITS } from '../lib/fileType'
+import { validateFile } from '../lib/fileType'
 
 // VOLT — Groups hook (send-only distribution lists)
 //
@@ -360,7 +360,7 @@ export function useGroups(user) {
       if (!check.ok) {
         toast(
           check.reason === 'too_large'
-            ? `File exceeds the ${check.limit === SIZE_LIMITS.audio ? '10' : '15'} MB limit`
+            ? 'File exceeds the 10 MB limit'
             : 'File is empty',
           'error'
         )

@@ -4,7 +4,7 @@ import { toast } from '../components/ui/toastStore'
 import { trackEvent } from '../lib/analytics'
 import { checkRateLimit } from '../lib/rateLimit'
 import { uploadFile, SizeError } from '../lib/uploadFile'
-import { classifyFile, validateFile, SIZE_LIMITS } from '../lib/fileType'
+import { classifyFile, validateFile } from '../lib/fileType'
 
 const SUPABASE_BUCKET = 'clips'
 const CLOUDINARY_CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
@@ -257,10 +257,7 @@ export function useClips(user) {
     if (file.size > 0) {
       const check = validateFile({ type: file.type || 'application/octet-stream', size: file.size })
       if (!check.ok) {
-        toast(
-          `File exceeds the ${check.limit === SIZE_LIMITS.audio ? '10' : '15'} MB limit`,
-          'error'
-        )
+        toast('File exceeds the 10 MB limit', 'error')
         return
       }
     }

@@ -29,10 +29,15 @@ export function resourceTypeFor(kind) {
   }
 }
 
-// Upload size limits in bytes (Req 1.3, 1.4, 2.1, 2.2)
+// Upload size limits in bytes. Uniform 10 MB cap across all kinds to match the
+// Cloudinary plan's hard limit — a larger file would pass a client-side gate
+// and then fail at Cloudinary with a confusing error, so every kind (image,
+// audio, file) is gated at the same ceiling here (Req 1.3, 1.4, 2.1, 2.2).
+export const MAX_UPLOAD_BYTES = 10_485_760 // 10 MB
 export const SIZE_LIMITS = {
-  file: 15_728_640, // 15 MB
-  audio: 10_485_760, // 10 MB
+  image: MAX_UPLOAD_BYTES,
+  file: MAX_UPLOAD_BYTES,
+  audio: MAX_UPLOAD_BYTES,
 }
 
 /**
@@ -48,14 +53,9 @@ export function validateFile({ type, size } = {}) {
   }
 
   const kind = classifyFile(type)
-
-  if (kind === 'audio' && bytes > SIZE_LIMITS.audio) {
-    return { ok: false, reason: 'too_large', limit: SIZE_LIMITS.audio }
-  }
-
-  // Images have no size gate here; only 'file' and 'audio' are limited.
-  if (kind === 'file' && bytes > SIZE_LIMITS.file) {
-    return { ok: false, reason: 'too_large', limit: SIZE_LIMITS.file }
+  const limit = SIZE_LIMITS[kind] ?? MAX_UPLOAD_BYTES
+  if (bytes > limit) {
+    return { ok: false, reason: 'too_large', limit }
   }
 
   return { ok: true }
