@@ -1089,6 +1089,7 @@ export default function Dashboard({ user, profile }) {
 
                 {!bulkMode && (
                   <div className="clip-card-bottom">
+                   <div className="clip-card-bottom-inner">
                     <time>{formatDate(clip.created_at)}</time>
                     <div className="clip-actions">
                       {/* Copy only makes sense for text/link content, not binaries. */}
@@ -1155,6 +1156,7 @@ export default function Dashboard({ user, profile }) {
                       </div>
                       <button className="delete-action" onClick={() => handleDeleteClick(clip)} title="Delete"><IconTrash /></button>
                     </div>
+                   </div>
                   </div>
                 )}
               </article>

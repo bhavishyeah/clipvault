@@ -936,14 +936,21 @@
   color: var(--text-muted);
 }
 
-/* Clip card bottom */
+/* Clip card bottom — the OUTER element is purely the collapsing grid wrapper
+   (0fr at rest → 1fr on hover). It carries no border/padding/margin of its own
+   so that, when collapsed, it contributes ZERO height (no empty gap). All the
+   visual styling lives on .clip-card-bottom-inner. */
 .clip-card-bottom {
+  margin-top: 0;
+}
+
+.clip-card-bottom-inner {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-top: auto;
   padding-top: 12px;
+  margin-top: 4px;
   border-top: 1px solid var(--border);
 }
 
@@ -1647,19 +1654,25 @@
    magic" on approach. Touch devices (no hover) always show the chrome.
    -------------------------------------------------------------------------- */
 
-/* Bottom action row: collapse height + fade at rest. The row is wrapped in a
-   grid whose single row animates from 0fr (collapsed) to 1fr (full height). */
+/* Bottom action row: truly zero-height at rest, expands on hover. The OUTER
+   .clip-card-bottom is a one-row grid animating 0fr → 1fr; its inner child is
+   overflow-clipped so nothing shows or reserves space when collapsed. The card
+   gap above it is removed at rest (negative margin) so there is no empty band;
+   it returns on hover together with the row. */
 .clip-card .clip-card-bottom {
   display: grid;
   grid-template-rows: 0fr;
   opacity: 0;
-  /* GPU-friendly: grid-template-rows + opacity transition, no layout thrash
-     on neighbours (only this card's own box changes). */
-  transition: grid-template-rows .22s cubic-bezier(.22, 1, .36, 1), opacity .18s ease;
+  margin-top: -12px;        /* cancel the card's flex `gap` while collapsed */
+  transition:
+    grid-template-rows .24s cubic-bezier(.22, 1, .36, 1),
+    opacity .18s ease,
+    margin-top .24s cubic-bezier(.22, 1, .36, 1);
 }
 
-/* The actual content must be an overflow:hidden child for 0fr to clip it. */
-.clip-card .clip-card-bottom > * {
+/* The single grid child must be min-height:0 + overflow:hidden so the 0fr row
+   actually clips it to zero. */
+.clip-card .clip-card-bottom > .clip-card-bottom-inner {
   min-height: 0;
   overflow: hidden;
 }
@@ -1668,6 +1681,7 @@
 .clip-card:focus-within .clip-card-bottom {
   grid-template-rows: 1fr;
   opacity: 1;
+  margin-top: 0;
 }
 
 /* Top-bar "+ tag" affordance: hidden at rest, revealed on hover. Existing tag
@@ -1687,6 +1701,7 @@
   .clip-card .clip-card-bottom {
     grid-template-rows: 1fr;
     opacity: 1;
+    margin-top: 0;
   }
   .clip-card .tag-editor .tag-add {
     opacity: 1;
@@ -1697,6 +1712,7 @@
 .clip-card.selected .clip-card-bottom {
   grid-template-rows: 1fr;
   opacity: 1;
+  margin-top: 0;
 }
 .clip-card.selected .tag-editor .tag-add {
   opacity: 1;
