@@ -31,6 +31,8 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 )
 
+const APP_ORIGIN = process.env.VITE_APP_ORIGIN || 'https://clipvault-lilac.vercel.app'
+
 // Cloudinary account config. CLOUD_NAME is the public cloud (same value the
 // client uses to upload); API_KEY/API_SECRET are server-only credentials used
 // to sign the destroy request.
@@ -150,7 +152,7 @@ async function handleDelete(req, res, ownerId) {
 }
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Origin', APP_ORIGIN)
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
 

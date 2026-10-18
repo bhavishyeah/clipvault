@@ -37,11 +37,14 @@ import {
   buildFanoutRows,
 } from '../lib/ingest.js'
 import { validatePreviewUrl, isPrivateHost } from '../lib/linkPreview.js'
+import { rateLimit, clientIp } from '../lib/rateLimit.js'
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 )
+
+const APP_ORIGIN = process.env.VITE_APP_ORIGIN || 'https://clipvault-lilac.vercel.app'
 
 const CLOUD_NAME = process.env.VITE_CLOUDINARY_CLOUD_NAME
 const UPLOAD_PRESET = process.env.VITE_CLOUDINARY_UPLOAD_PRESET
@@ -124,7 +127,7 @@ async function uploadToCloudinary(fileValue, userId) {
 }
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Origin', APP_ORIGIN)
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
 
@@ -142,6 +145,13 @@ export default async function handler(req, res) {
       return res.status(401).json({ error: 'Invalid or expired session' })
     }
     const senderId = userData.user.id
+
+    // Rate limit per authenticated sender to blunt ingest bursts/abuse.
+    const rl = rateLimit(`ingest:${senderId}`, { limit: 30, windowMs: 60_000 })
+    if (!rl.allowed) {
+      res.setHeader('Retry-After', String(rl.retryAfterSec))
+      return res.status(429).json({ error: 'Too many requests' })
+    }
 
     // 2. Normalize the payload (shared by single and group sends).
     const normalized = normalizePayload(req.body || {})

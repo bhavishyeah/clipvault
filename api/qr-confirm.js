@@ -12,8 +12,10 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 )
 
+const APP_ORIGIN = process.env.VITE_APP_ORIGIN || 'https://clipvault-lilac.vercel.app'
+
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Origin', APP_ORIGIN)
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
 
@@ -54,7 +56,7 @@ export default async function handler(req, res) {
     // Create anonymous user via admin API. The password is random and
     // immediately discarded — it is never derived from the token and never
     // returned. The user only ever authenticates via a magiclink token_hash.
-    const anonEmail = `anon-${Date.now()}@volt.temp`
+    const anonEmail = `anon-${crypto.randomUUID()}@volt.temp`
     const anonPassword = crypto.randomBytes(24).toString('hex')
 
     const { data: userData, error: createError } = await supabase.auth.admin.createUser({

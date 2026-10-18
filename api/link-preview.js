@@ -35,6 +35,8 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 )
 
+const APP_ORIGIN = process.env.VITE_APP_ORIGIN || 'https://clipvault-lilac.vercel.app'
+
 // Per-owner preview limit (Req 4.7). Previews are fetched on save/first view of
 // a link clip, so a modest burst is normal; this blunts scripted scraping
 // through the endpoint. Best-effort, per-instance (see lib/rateLimit.js).
@@ -185,7 +187,7 @@ async function handlePreview(req, res, ownerId) {
 }
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Origin', APP_ORIGIN)
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
 
